@@ -9,23 +9,36 @@ export function makeStep(data = {}) {
     description: data.description || "",
     responsible: data.responsible || "",
     duration: data.duration || "",
+    phase: data.phase || "",
     status: "pending",
   };
 }
 
 export function makeWorkflow(data = {}) {
   const now = new Date().toISOString();
-  return {
+  const base = {
     id: crypto.randomUUID(),
     name: data.name || "Nouveau workflow",
     description: data.description || "",
     status: "draft",
     trigger: "",
-    steps: [],
+    steps: data.steps || [],
     tags: [],
+    wfType: data.wfType || "generic",
     createdAt: now,
     updatedAt: now,
   };
+  if (data.wfType === "mep") {
+    Object.assign(base, {
+      criticite: data.criticite || "normal",
+      datePrevisionnelle: data.datePrevisionnelle || "",
+      livrable: data.livrable || "",
+      chefDeProjet: data.chefDeProjet || "",
+      application: data.application || "",
+      environnement: data.environnement || "Production",
+    });
+  }
+  return base;
 }
 
 export function loadWorkflows() {
