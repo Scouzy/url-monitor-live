@@ -12,12 +12,7 @@ export const MAX_HISTORY = 500;
 export const DEFAULT_INTERVAL = 30;
 export const STORAGE_KEY = "url-monitor-urls";
 
-export const DEFAULT_URLS = [
-  "https://www.google.com",
-  "https://www.github.com",
-  "https://httpstat.us/200",
-  "https://httpstat.us/500",
-];
+export const DEFAULT_URLS = [];
 
 export const STATUS_CONFIG = {
   [STATUS.PENDING]: {

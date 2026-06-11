@@ -98,16 +98,6 @@ export function getDefaultGroups() {
       id: "general",
       name: "Général",
       isGlobal: true,
-      urls: DEFAULT_URLS.map(makeEntry),
-    },
-    {
-      id: "france-competences",
-      name: "France Compétences",
-      urls: [],
-    },
-    {
-      id: "apps-privees",
-      name: "Apps Privées",
       urls: [],
     },
   ];

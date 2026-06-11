@@ -306,6 +306,10 @@ function itcarePlugin() {
 
 export default defineConfig({
   plugins: [react(), sslCheckPlugin(), screenshotPlugin(), itcarePlugin()],
+  server: {
+    port: 5173,
+    strictPort: true,
+  },
   base: './',
   build: {
     outDir: 'dist',
