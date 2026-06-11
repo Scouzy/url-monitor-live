@@ -1,15 +1,7 @@
-import { useState, useMemo, useSyncExternalStore } from "react";
+import { useState, useMemo, useSyncExternalStore, useRef, useLayoutEffect, useCallback, useEffect } from "react";
 import { Network, Plus, Trash2, ChevronDown, ChevronRight, Server, ArrowRight } from "lucide-react";
 import { getServers, subscribeServers } from "../utils/servers";
 import { loadImpacts, saveImpacts } from "../utils/appImpactStorage";
-
-/* ── Constantes de mise en page schéma ── */
-const CARD_W = 210;
-const CARD_H = 115;
-const GAP_X  = 90;
-const GAP_Y  = 65;
-const COLS   = 3;
-const PAD    = 44;
 
 const DEP_TYPES = {
   depends_on: { label: "Dépend de",     color: "#F87171" },
@@ -18,13 +10,6 @@ const DEP_TYPES = {
   calls:      { label: "Appelle l'API",  color: "#818CF8" },
   feeds:      { label: "Alimente",       color: "#FB923C" },
 };
-
-function getPos(idx) {
-  return {
-    x: PAD + (idx % COLS) * (CARD_W + GAP_X),
-    y: PAD + Math.floor(idx / COLS) * (CARD_H + GAP_Y),
-  };
-}
 
 function avgMetric(servers, key) {
   const vals = servers.map(s => s[key]).filter(v => v != null);
@@ -58,6 +43,9 @@ export default function AppImpactMap() {
   const [expanded, setExpanded] = useState(new Set());
   const [newDep, setNewDep]   = useState({ from: "", to: "", type: "depends_on" });
   const [selApp, setSelApp]   = useState(null);
+  const [linePositions, setLinePositions] = useState([]);
+  const wrapperRef = useRef(null);
+  const cardRefs   = useRef({});
 
   const persist = (data) => { setImpacts(data); saveImpacts(data); };
 
@@ -79,9 +67,37 @@ export default function AppImpactMap() {
   }, [servers]);
 
   const appNames = appGroups.map(g => g.name);
-  const totalW = PAD * 2 + COLS * CARD_W + (COLS - 1) * GAP_X;
-  const rowCount = Math.max(1, Math.ceil(appGroups.length / COLS));
-  const totalH = PAD * 2 + rowCount * CARD_H + (rowCount - 1) * GAP_Y;
+
+  /* ── Calcul des positions SVG via DOM ── */
+  const computeLines = useCallback(() => {
+    if (!wrapperRef.current || impacts.dependencies.length === 0) { setLinePositions([]); return; }
+    const base = wrapperRef.current.getBoundingClientRect();
+    const positions = impacts.dependencies.map(dep => {
+      const fromEl = cardRefs.current[dep.from];
+      const toEl   = cardRefs.current[dep.to];
+      if (!fromEl || !toEl) return null;
+      const fr = fromEl.getBoundingClientRect();
+      const tr = toEl.getBoundingClientRect();
+      return {
+        id:   dep.id,
+        type: dep.type,
+        sx: fr.left - base.left + fr.width  / 2,
+        sy: fr.top  - base.top  + fr.height / 2,
+        tx: tr.left - base.left + tr.width  / 2,
+        ty: tr.top  - base.top  + tr.height / 2,
+      };
+    }).filter(Boolean);
+    setLinePositions(positions);
+  }, [impacts.dependencies, appGroups]);
+
+  useLayoutEffect(() => { computeLines(); }, [computeLines]);
+
+  useEffect(() => {
+    if (!wrapperRef.current) return;
+    const ro = new ResizeObserver(() => computeLines());
+    ro.observe(wrapperRef.current);
+    return () => ro.disconnect();
+  }, [computeLines]);
 
   const addDep = () => {
     if (!newDep.from || !newDep.to || newDep.from === newDep.to) return;
@@ -122,7 +138,7 @@ export default function AppImpactMap() {
 
       {/* ══ CARTE ══ */}
       {tab === "Carte" && (
-        <div style={{ flex: 1, overflow: "auto", position: "relative" }}>
+        <div style={{ flex: 1, overflow: "auto" }}>
           {appGroups.length === 0 ? (
             <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%", color: "#374151", flexDirection: "column", gap: 10 }}>
               <Network size={44} color="#1F2937" />
@@ -130,73 +146,75 @@ export default function AppImpactMap() {
               <div style={{ fontSize: 11, color: "#4B5563" }}>Importez des serveurs avec un champ "Application" pour afficher la carte</div>
             </div>
           ) : (
-            <div style={{ position: "relative", width: totalW, minHeight: totalH }}>
-              {/* SVG lignes dépendances */}
-              <svg style={{ position: "absolute", top: 0, left: 0, width: totalW, height: totalH, pointerEvents: "none", overflow: "visible" }}>
-                <defs>
-                  {Object.entries(DEP_TYPES).map(([k, v]) => (
-                    <marker key={k} id={`arrow-${k}`} markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
-                      <path d="M0,0 L0,6 L8,3 z" fill={v.color} opacity="0.8" />
-                    </marker>
-                  ))}
-                </defs>
-                {impacts.dependencies.map(dep => {
-                  const fi = appGroups.findIndex(g => g.name === dep.from);
-                  const ti = appGroups.findIndex(g => g.name === dep.to);
-                  if (fi < 0 || ti < 0) return null;
-                  const fp = getPos(fi), tp = getPos(ti);
-                  const sx = fp.x + CARD_W / 2, sy = fp.y + CARD_H / 2;
-                  const tx = tp.x + CARD_W / 2, ty = tp.y + CARD_H / 2;
-                  const mx = (tx - sx) / 2;
-                  const col = DEP_TYPES[dep.type]?.color || "#818CF8";
+            <div ref={wrapperRef} style={{ position: "relative", padding: "20px" }}>
+
+              {/* SVG overlay — flèches de dépendances (DOM-based) */}
+              {linePositions.length > 0 && (
+                <svg style={{ position: "absolute", top: 0, left: 0, width: "100%", height: "100%", pointerEvents: "none", zIndex: 1, overflow: "visible" }}>
+                  <defs>
+                    {Object.entries(DEP_TYPES).map(([k, v]) => (
+                      <marker key={k} id={`arrow-${k}`} markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+                        <path d="M0,0 L0,6 L8,3 z" fill={v.color} opacity="0.8" />
+                      </marker>
+                    ))}
+                  </defs>
+                  {linePositions.map(lp => {
+                    const col = DEP_TYPES[lp.type]?.color || "#818CF8";
+                    const mx  = (lp.tx - lp.sx) / 2;
+                    return (
+                      <path key={lp.id}
+                        d={`M ${lp.sx} ${lp.sy} C ${lp.sx + mx} ${lp.sy}, ${lp.tx - mx} ${lp.ty}, ${lp.tx} ${lp.ty}`}
+                        stroke={col} strokeWidth={1.5} fill="none" opacity={0.7}
+                        strokeDasharray="5 4" markerEnd={`url(#arrow-${lp.type})`}
+                      />
+                    );
+                  })}
+                </svg>
+              )}
+
+              {/* Grille CSS responsive — toute la largeur disponible */}
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))", gap: 16, position: "relative", zIndex: 2 }}>
+                {appGroups.map((app) => {
+                  const cpuC  = healthColor(app.cpuAvg);
+                  const ramC  = healthColor(app.ramAvg);
+                  const isSel = selApp === app.name;
                   return (
-                    <path key={dep.id}
-                      d={`M ${sx} ${sy} C ${sx + mx} ${sy}, ${tx - mx} ${ty}, ${tx} ${ty}`}
-                      stroke={col} strokeWidth={1.5} fill="none" opacity={0.7}
-                      strokeDasharray="5 4"
-                      markerEnd={`url(#arrow-${dep.type})`}
-                    />
+                    <div
+                      key={app.name}
+                      ref={el => { cardRefs.current[app.name] = el; }}
+                      onClick={() => setSelApp(isSel ? null : app.name)}
+                      style={{
+                        background: isSel ? "rgba(99,102,241,0.12)" : "#151B27",
+                        border: `1px solid ${isSel ? "rgba(99,102,241,0.45)" : "rgba(255,255,255,0.08)"}`,
+                        borderRadius: 12, padding: "14px 16px", cursor: "pointer",
+                        boxShadow: isSel ? "0 0 0 2px rgba(99,102,241,0.25)" : "none",
+                        transition: "all 0.15s",
+                      }}
+                      onMouseEnter={e => { if (!isSel) e.currentTarget.style.borderColor = "rgba(255,255,255,0.16)"; }}
+                      onMouseLeave={e => { if (!isSel) e.currentTarget.style.borderColor = "rgba(255,255,255,0.08)"; }}
+                    >
+                      <div style={{ fontWeight: 700, fontSize: 13, color: "#E5E7EB", marginBottom: 4, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        {app.name}
+                      </div>
+                      <div style={{ fontSize: 10, color: "#4B5563", marginBottom: 10, display: "flex", alignItems: "center", gap: 4 }}>
+                        <Server size={9} /> {app.servers.length} serveur{app.servers.length !== 1 ? "s" : ""}
+                      </div>
+                      {app.cpuAvg != null && (
+                        <div style={{ marginBottom: 5 }}>
+                          <div style={{ fontSize: 9, color: "#374151", marginBottom: 2 }}>CPU</div>
+                          <MiniBar value={app.cpuAvg} color={cpuC} />
+                        </div>
+                      )}
+                      {app.ramAvg != null && (
+                        <div>
+                          <div style={{ fontSize: 9, color: "#374151", marginBottom: 2 }}>RAM</div>
+                          <MiniBar value={app.ramAvg} color={ramC} />
+                        </div>
+                      )}
+                    </div>
                   );
                 })}
-              </svg>
-
-              {/* Cartes applications */}
-              {appGroups.map((app, idx) => {
-                const pos = getPos(idx);
-                const cpuC = healthColor(app.cpuAvg);
-                const ramC = healthColor(app.ramAvg);
-                const isSel = selApp === app.name;
-                return (
-                  <div key={app.name} onClick={() => setSelApp(isSel ? null : app.name)} style={{
-                    position: "absolute", left: pos.x, top: pos.y,
-                    width: CARD_W, height: CARD_H,
-                    background: isSel ? "rgba(99,102,241,0.12)" : "#151B27",
-                    border: `1px solid ${isSel ? "rgba(99,102,241,0.45)" : "rgba(255,255,255,0.08)"}`,
-                    borderRadius: 12, padding: "12px 14px", cursor: "pointer",
-                    boxShadow: isSel ? "0 0 0 2px rgba(99,102,241,0.25)" : "none",
-                    transition: "all 0.15s",
-                  }}>
-                    <div style={{ fontWeight: 700, fontSize: 13, color: "#E5E7EB", marginBottom: 3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                      {app.name}
-                    </div>
-                    <div style={{ fontSize: 10, color: "#4B5563", marginBottom: 8, display: "flex", alignItems: "center", gap: 4 }}>
-                      <Server size={9} /> {app.servers.length} serveur{app.servers.length !== 1 ? "s" : ""}
-                    </div>
-                    {app.cpuAvg != null && (
-                      <div style={{ marginBottom: 4 }}>
-                        <div style={{ fontSize: 9, color: "#4B5563", marginBottom: 2 }}>CPU</div>
-                        <MiniBar value={app.cpuAvg} color={cpuC} />
-                      </div>
-                    )}
-                    {app.ramAvg != null && (
-                      <div>
-                        <div style={{ fontSize: 9, color: "#4B5563", marginBottom: 2 }}>RAM</div>
-                        <MiniBar value={app.ramAvg} color={ramC} />
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
+              </div>
             </div>
           )}
         </div>
