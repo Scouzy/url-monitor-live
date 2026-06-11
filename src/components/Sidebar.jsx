@@ -191,9 +191,10 @@ export default function Sidebar({ groups, activeGroupId, onSelect, onAddGroup, o
       <nav style={{ flex: 1, overflowY: "auto", padding: "4px 8px" }}>
         {groups.map(g => {
           const isActive = g.id === activeGroupId;
+          const isOk = u => { const s = getStatus(u); return s === STATUS.ONLINE || s === STATUS.SLOW; };
           const onlineCount = g.isGlobal
-            ? (totalOnline ?? g.urls.filter(u => getStatus(u) === STATUS.ONLINE).length)
-            : g.urls.filter(u => getStatus(u) === STATUS.ONLINE).length;
+            ? (totalOnline ?? g.urls.filter(isOk).length)
+            : g.urls.filter(isOk).length;
           const urlCount = g.isGlobal ? (totalUrls ?? g.urls.length) : g.urls.length;
           const checking = g.urls.some(u => checkingIds.has(u.id));
           const FolderIcon = g.isGlobal ? Globe : (isActive ? FolderOpen : Folder);

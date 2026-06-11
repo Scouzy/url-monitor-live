@@ -361,12 +361,13 @@ export default function App() {
     ? groups.flatMap(g => g.urls.map(u => ({ ...u, _groupId: g.id, _groupName: g.name })))
     : (activeGroup?.urls || []);
   const allUrls = groups.flatMap(g => g.urls);
-  const onlineCount = groupUrls.filter(u => getStatus(u) === STATUS.ONLINE).length;
+  const isUp = u => { const s = getStatus(u); return s === STATUS.ONLINE || s === STATUS.SLOW; };
+  const onlineCount = groupUrls.filter(isUp).length;
   const checkedUrls = groupUrls.filter(u => u.responseTime !== null);
   const avgResponse = checkedUrls.length > 0
     ? Math.round(checkedUrls.reduce((s, u) => s + u.responseTime, 0) / checkedUrls.length) : 0;
   const uptimePercent = groupUrls.length > 0 ? Math.round((onlineCount / groupUrls.length) * 100) : 0;
-  const totalOnline = allUrls.filter(u => getStatus(u) === STATUS.ONLINE).length;
+  const totalOnline = allUrls.filter(isUp).length;
   const displayedUrls = groupUrls.filter(entry => {
     if (filterText) {
       const q = filterText.toLowerCase();
