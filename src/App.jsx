@@ -1,0 +1,840 @@
+import { useState, useEffect, useRef, useCallback, useSyncExternalStore } from "react";
+import { Globe, Plus, RefreshCw, Pause, Play, Wifi, WifiOff, Zap, LayoutGrid, List, Search, X, Activity, AlertTriangle, Settings, Bell, BellOff, Lock, CheckCircle, Server } from "lucide-react";
+import { STATUS, DEFAULT_INTERVAL, MAX_HISTORY, getStatus } from "./constants";
+import { checkUrl } from "./utils/checkUrl";
+import { checkSsl } from "./utils/checkSsl";
+import { loadGroups, saveGroups, getDefaultGroups, makeEntry, makeGroup } from "./utils/storage";
+import Sidebar from "./components/Sidebar";
+import StatCard from "./components/StatCard";
+import UrlCard from "./components/UrlCard";
+import Toast from "./components/Toast";
+import ExcelImport from "./components/ExcelImport";
+import IncidentLog, { loadLog, addIncident, IncidentLogPage } from "./components/IncidentLog";
+import ServersView from "./components/ServersView";
+import CapacityPlanning from "./components/CapacityPlanning";
+import ServerImport from "./components/ServerImport";
+import TodoList from "./components/TodoList";
+import { subscribeServers, getServers, recommendations as getRecos } from "./utils/servers";
+import { loadCapacitySettings, saveCapacitySettings } from "./utils/capacitySettings";
+import { loadTodos } from "./utils/todoStorage";
+import { clearSnapshots } from "./utils/snapshots";
+
+export default function App() {
+  const [groups, setGroups] = useState(() => loadGroups() || getDefaultGroups());
+  const [activeGroupId, setActiveGroupId] = useState(() => {
+    const g = loadGroups() || getDefaultGroups();
+    return g[0]?.id;
+  });
+  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [viewMode, setViewMode] = useState("grid");
+  const [filterText, setFilterText] = useState("");
+  const [filterStatus, setFilterStatus] = useState("all");
+  const [input, setInput] = useState("");
+  const [interval, setInterval_] = useState(DEFAULT_INTERVAL);
+  const [paused, setPaused] = useState(false);
+  const [countdown, setCountdown] = useState(DEFAULT_INTERVAL);
+  const [checkingIds, setCheckingIds] = useState(new Set());
+  const [toasts, setToasts] = useState([]);
+  const [incidentLog, setIncidentLog] = useState(() => loadLog());
+  const [mainTab, setMainTab] = useState("surveillance"); // surveillance | journal | parametres
+  const [activeModule, setActiveModule] = useState("monitor"); // monitor | servers | capacity
+  const [notifEnabled, setNotifEnabled] = useState(() => typeof Notification !== "undefined" && Notification.permission === "granted");
+  const [capacitySettings, setCapacitySettings] = useState(() => loadCapacitySettings());
+  const allServers = useSyncExternalStore(subscribeServers, getServers);
+  const [todoBadge, setTodoBadge] = useState(() => loadTodos().filter(t => t.status !== "done").length);
+
+  useEffect(() => {
+    const handler = (e) => setTodoBadge((e.detail || []).filter(t => t.status !== "done").length);
+    window.addEventListener("todos-changed", handler);
+    return () => window.removeEventListener("todos-changed", handler);
+  }, []);
+
+  const countdownRef = useRef(null);
+  const intervalRef = useRef(interval);
+  const prevStatusRef = useRef({});
+  const sslTsRef = useRef({});
+  const groupsRef = useRef(groups);
+  useEffect(() => { groupsRef.current = groups; }, [groups]);
+
+  useEffect(() => { intervalRef.current = interval; }, [interval]);
+  useEffect(() => { setFilterText(""); setFilterStatus("all"); }, [activeGroupId]);
+  useEffect(() => { saveGroups(groups); }, [groups]);
+
+  /* ── Alertes serveurs : seuil CPU/RAM/Disk ── */
+  const serverAlertInitRef = useRef(false);
+  useEffect(() => {
+    if (!serverAlertInitRef.current) { serverAlertInitRef.current = true; return; }
+    if (allServers.length === 0) return;
+    const { cpuThreshold = 90, ramThreshold = 90, diskThreshold = 90 } = capacitySettings;
+    const thresholds = { cpu: cpuThreshold, ram: ramThreshold, disk: diskThreshold };
+    allServers.forEach(s => {
+      ['cpu', 'ram', 'disk'].forEach(metric => {
+        const val = s[metric] ?? 0;
+        if (val < thresholds[metric]) return;
+        setIncidentLog(prev => {
+          const recent = prev.find(e => e.type === "server_alert" && e.serverName === s.name && e.metric === metric && Date.now() - e.ts < 3600000);
+          if (recent) return prev;
+          return addIncident(prev, { url: s.name, groupName: "Serveurs", type: "server_alert", metric, value: val, serverName: s.name });
+        });
+      });
+    });
+    getRecos(allServers).filter(r => r.severity === "critical").forEach(r => {
+      setIncidentLog(prev => {
+        const recent = prev.find(e => e.type === "capacity_alert" && e.recoText === r.text && Date.now() - e.ts < 86400000);
+        if (recent) return prev;
+        return addIncident(prev, { url: r.server || "Flotte", groupName: "Capacity", type: "capacity_alert", recoText: r.text, recoType: r.type });
+      });
+    });
+  }, [allServers]); // eslint-disable-line
+
+  /* ── Scan SSL initial : certs déjà stockés ≤ 10j ── */
+  useEffect(() => {
+    const allGroupUrls = groups.flatMap(g =>
+      g.urls.map(u => ({ ...u, _groupName: g.name }))
+    );
+    allGroupUrls.forEach(u => {
+      const ssl = u.sslInfo;
+      if (!ssl || ssl.daysLeft == null || ssl.daysLeft > 10) return;
+      setIncidentLog(prev => {
+        const recent = prev.find(e =>
+          e.type === "ssl_expiry" && e.url === u.url &&
+          Date.now() - e.ts < 24 * 60 * 60 * 1000
+        );
+        if (recent) return prev;
+        return addIncident(prev, {
+          url: u.url, groupName: u._groupName,
+          type: "ssl_expiry", daysLeft: ssl.daysLeft, notAfter: ssl.notAfter,
+        });
+      });
+    });
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const addToast = useCallback((url, type) => {
+    setToasts(prev => [...prev.slice(-4), { id: crypto.randomUUID(), url, type }]);
+  }, []);
+
+  const dismissToast = useCallback((id) => {
+    setToasts(prev => prev.filter(t => t.id !== id));
+  }, []);
+
+  const applySslResult = useCallback((groupId, urlId, result) => {
+    /* Alerte SSL si expiration dans ≤ 10 jours */
+    if (result.valid && result.daysLeft != null && result.daysLeft <= 10) {
+      const grp = groupsRef.current.find(g => g.id === groupId);
+      const urlEntry = grp?.urls.find(u => u.id === urlId);
+      if (urlEntry) {
+        setIncidentLog(prev => {
+          /* Dédoublonnage : ne pas ré-alerter si déjà enregistré dans les 24 dernières heures */
+          const recent = prev.find(e =>
+            e.type === "ssl_expiry" && e.url === urlEntry.url &&
+            Date.now() - e.ts < 24 * 60 * 60 * 1000
+          );
+          if (recent) return prev;
+          /* Notification navigateur */
+          if (typeof Notification !== "undefined" && Notification.permission === "granted") {
+            const domain = (() => { try { return new URL(urlEntry.url).hostname; } catch { return urlEntry.url; } })();
+            new Notification(`🔐 Certificat SSL : ${domain}`, {
+              body: result.daysLeft <= 0
+                ? "Le certificat SSL a expiré !"
+                : `Expire dans ${result.daysLeft} jour${result.daysLeft > 1 ? "s" : ""}.`,
+              icon: `https://www.google.com/s2/favicons?domain=${domain}&sz=64`,
+              tag: `ssl-${urlId}`,
+            });
+          }
+          return addIncident(prev, {
+            url: urlEntry.url,
+            groupName: grp?.name,
+            type: "ssl_expiry",
+            daysLeft: result.daysLeft,
+            notAfter: result.notAfter,
+          });
+        });
+      }
+    }
+    setGroups(gs => {
+      const next = gs.map(g => g.id !== groupId ? g : {
+        ...g,
+        urls: g.urls.map(u => u.id !== urlId ? u : {
+          ...u, sslInfo: { ...result, lastChecked: new Date().toISOString() },
+        }),
+      });
+      saveGroups(next);
+      return next;
+    });
+  }, []);
+
+  const runSslCheck = useCallback((groupId, urlId, urlStr, force = false) => {
+    if (!urlStr.startsWith('https://')) return;
+    if (!force) {
+      const age = Date.now() - (sslTsRef.current[urlId] || 0);
+      if (age < 60 * 60 * 1000) return;
+    }
+    sslTsRef.current[urlId] = Date.now();
+    checkSsl(urlStr).then(result => applySslResult(groupId, urlId, result));
+  }, [applySslResult]);
+
+  /* ── Notifications navigateur ── */
+  useEffect(() => {
+    if (typeof Notification !== "undefined" && Notification.permission === "default") {
+      Notification.requestPermission();
+    }
+  }, []);
+
+  const applyResult = useCallback((groupId, urlId, urlStr, result) => {
+    const prev = prevStatusRef.current[urlId];
+    const changed = prev !== undefined && prev !== result.isUp;
+    if (changed) {
+      const type = result.isUp ? "online" : "offline";
+      addToast(urlStr, type);
+      /* Notification navigateur */
+      if (typeof Notification !== "undefined" && Notification.permission === "granted") {
+        const domain = (() => { try { return new URL(urlStr).hostname; } catch { return urlStr; } })();
+        new Notification(type === "offline" ? `🔴 ${domain} est hors ligne` : `🟢 ${domain} est de retour`, {
+          body: type === "offline" ? "Le site ne répond plus." : "Le site répond à nouveau.",
+          icon: `https://www.google.com/s2/favicons?domain=${domain}&sz=64`,
+          tag: urlId,
+        });
+      }
+      /* Journal d'incidents */
+      const grp = groupsRef.current.find(g => g.id === groupId);
+      setIncidentLog(prev => addIncident(prev, { url: urlStr, groupName: grp?.name, type }));
+    }
+    prevStatusRef.current[urlId] = result.isUp;
+    setGroups(gs => gs.map(g => {
+      if (g.id !== groupId) return g;
+      return {
+        ...g, urls: g.urls.map(u => {
+          if (u.id !== urlId) return u;
+          const newHistory = [...u.history, { ts: Date.now(), isUp: result.isUp, rt: result.responseTime }].slice(-MAX_HISTORY);
+          return { ...u, isUp: result.isUp, responseTime: result.responseTime, lastCheck: new Date(), history: newHistory, status: result.status };
+        }),
+      };
+    }));
+    setCheckingIds(prev => { const s = new Set(prev); s.delete(urlId); return s; });
+  }, [addToast]);
+
+  const runCheck = useCallback((groupId, urlId, urlStr) => {
+    setCheckingIds(cs => new Set(cs).add(urlId));
+    checkUrl(urlStr).then(result => applyResult(groupId, urlId, urlStr, result));
+  }, [applyResult]);
+
+  const runAllChecks = useCallback(() => {
+    const current = groupsRef.current;
+    current.forEach(g => g.urls.forEach(u => {
+      if (u.paused) return; /* URL en pause — monitoring suspendu */
+      setCheckingIds(cs => new Set(cs).add(u.id));
+      checkUrl(u.url).then(result => applyResult(g.id, u.id, u.url, result));
+      runSslCheck(g.id, u.id, u.url);
+    }));
+  }, [applyResult, runSslCheck]);
+
+  useEffect(() => { runAllChecks(); }, []);
+
+  useEffect(() => {
+    if (paused) { window.clearInterval(countdownRef.current); return; }
+    setCountdown(interval);
+    countdownRef.current = window.setInterval(() => {
+      setCountdown(prev => {
+        if (prev <= 1) { runAllChecks(); return intervalRef.current; }
+        return prev - 1;
+      });
+    }, 1000);
+    return () => window.clearInterval(countdownRef.current);
+  }, [paused, interval, runAllChecks]);
+
+  const addUrl = () => {
+    let url = input.trim();
+    if (!url) return;
+    if (!/^https?:\/\//i.test(url)) url = "https://" + url;
+    try { new URL(url); } catch { return; }
+    const group = groups.find(g => g.id === activeGroupId);
+    if (!group || group.urls.some(u => u.url.toLowerCase() === url.toLowerCase())) return;
+    const entry = makeEntry(url);
+    const next = groups.map(g => g.id === activeGroupId ? { ...g, urls: [...g.urls, entry] } : g);
+    setGroups(next);
+    saveGroups(next);
+    setInput("");
+    setTimeout(() => {
+      runCheck(activeGroupId, entry.id, entry.url);
+      runSslCheck(activeGroupId, entry.id, entry.url, true);
+    }, 50);
+  };
+
+  const togglePauseUrl = useCallback((groupId, urlId) => {
+    setGroups(gs => gs.map(g => g.id !== groupId ? g : {
+      ...g,
+      urls: g.urls.map(u => u.id !== urlId ? u : { ...u, paused: !u.paused }),
+    }));
+  }, []);
+
+  const removeUrl = (groupId, urlId) => {
+    const next = groups.map(g => g.id === groupId ? { ...g, urls: g.urls.filter(u => u.id !== urlId) } : g);
+    setGroups(next);
+    saveGroups(next);
+    delete prevStatusRef.current[urlId];
+  };
+
+  const addGroup = (name) => {
+    const g = makeGroup(name);
+    const next = [...groups, g];
+    setGroups(next);
+    saveGroups(next);
+    setActiveGroupId(g.id);
+  };
+
+  const removeGroup = (id) => {
+    const next = groups.filter(g => g.id !== id);
+    if (activeGroupId === id) setActiveGroupId(next[0]?.id);
+    setGroups(next);
+    saveGroups(next);
+  };
+
+  const renameGroup = (id, name) => {
+    const next = groups.map(g => g.id === id ? { ...g, name } : g);
+    setGroups(next);
+    saveGroups(next);
+  };
+
+  const updateCredentials = (groupId, urlId, creds) => {
+    const next = groups.map(g => g.id !== groupId ? g : {
+      ...g,
+      urls: g.urls.map(u => u.id !== urlId ? u : { ...u, credentials: creds }),
+    });
+    setGroups(next);
+    saveGroups(next);
+  };
+
+  const updateUrl = (groupId, urlId, newUrl) => {
+    const next = groups.map(g => g.id !== groupId ? g : {
+      ...g,
+      urls: g.urls.map(u => u.id !== urlId ? u : {
+        ...u,
+        url: newUrl,
+        isUp: null, responseTime: null, lastCheck: null, history: [], status: null,
+      }),
+    });
+    setGroups(next);
+    saveGroups(next);
+    setTimeout(() => runCheck(groupId, urlId, newUrl), 100);
+  };
+
+  /* ── Drag & drop réordonnancement ── */
+  const dragRef = useRef(null);
+  const [dragOverId, setDragOverId] = useState(null);
+
+  const moveUrl = useCallback((groupId, fromId, toId) => {
+    if (fromId === toId) return;
+    setGroups(gs => {
+      const next = gs.map(g => {
+        if (g.id !== groupId) return g;
+        const urls = [...g.urls];
+        const fi = urls.findIndex(u => u.id === fromId);
+        const ti = urls.findIndex(u => u.id === toId);
+        if (fi < 0 || ti < 0) return g;
+        const [moved] = urls.splice(fi, 1);
+        urls.splice(ti, 0, moved);
+        return { ...g, urls };
+      });
+      saveGroups(next);
+      return next;
+    });
+  }, []);
+
+  const handleExcelImport = (urls) => {
+    const group = groups.find(g => g.id === activeGroupId);
+    if (!group) return;
+    const existing = new Set(group.urls.map(u => u.url.toLowerCase()));
+    const newEntries = urls.filter(u => !existing.has(u.toLowerCase())).map(makeEntry);
+    if (!newEntries.length) return;
+    const next = groups.map(g => g.id === activeGroupId ? { ...g, urls: [...g.urls, ...newEntries] } : g);
+    setGroups(next);
+    saveGroups(next);
+    setTimeout(() => newEntries.forEach(e => {
+      runCheck(activeGroupId, e.id, e.url);
+      runSslCheck(activeGroupId, e.id, e.url, true);
+    }), 50);
+  };
+
+  const activeGroup = groups.find(g => g.id === activeGroupId);
+  const isAllView = activeGroup?.isGlobal === true;
+  const groupUrls = isAllView
+    ? groups.flatMap(g => g.urls.map(u => ({ ...u, _groupId: g.id, _groupName: g.name })))
+    : (activeGroup?.urls || []);
+  const allUrls = groups.flatMap(g => g.urls);
+  const onlineCount = groupUrls.filter(u => getStatus(u) === STATUS.ONLINE).length;
+  const checkedUrls = groupUrls.filter(u => u.responseTime !== null);
+  const avgResponse = checkedUrls.length > 0
+    ? Math.round(checkedUrls.reduce((s, u) => s + u.responseTime, 0) / checkedUrls.length) : 0;
+  const uptimePercent = groupUrls.length > 0 ? Math.round((onlineCount / groupUrls.length) * 100) : 0;
+  const totalOnline = allUrls.filter(u => getStatus(u) === STATUS.ONLINE).length;
+  const displayedUrls = groupUrls.filter(entry => {
+    if (filterText) {
+      const q = filterText.toLowerCase();
+      if (!entry.url.toLowerCase().includes(q)) return false;
+    }
+    if (filterStatus === "online" && getStatus(entry) !== STATUS.ONLINE) return false;
+    if (filterStatus === "offline" && getStatus(entry) !== STATUS.OFFLINE) return false;
+    return true;
+  });
+
+  const activeNavItem = activeModule !== "monitor" ? activeModule
+    : (mainTab === "journal" || mainTab === "parametres") ? mainTab
+    : "monitor";
+
+  return (
+    <div style={{ display: "flex", minHeight: "100vh", background: "#0B0F19", color: "#F3F4F6", fontFamily: "'Inter', system-ui, sans-serif" }}>
+      <Sidebar
+        groups={groups}
+        activeGroupId={activeGroupId}
+        onSelect={(id) => { setActiveGroupId(id); setActiveModule("monitor"); setMainTab("surveillance"); }}
+        onAddGroup={(name) => { addGroup(name); setActiveModule("monitor"); setMainTab("surveillance"); }}
+        onRemoveGroup={removeGroup}
+        onRenameGroup={renameGroup}
+        open={sidebarOpen}
+        onToggle={() => setSidebarOpen(o => !o)}
+        checkingIds={checkingIds}
+        totalUrls={allUrls.length}
+        totalOnline={totalOnline}
+        onImport={(importedGroups) => setGroups(() => { saveGroups(importedGroups); return importedGroups; })}
+        activeModule={activeNavItem}
+        journalBadge={incidentLog.filter(e => e.type !== "online").length}
+        todoBadge={todoBadge}
+        serversBadge={allServers.length}
+        onSelectModule={(id) => {
+          if (id === "journal" || id === "parametres") { setActiveModule("monitor"); setMainTab(id); }
+          else { setActiveModule(id); setMainTab("surveillance"); }
+        }}
+      />
+
+      {/* ══ MODULES NON-MONITOR ══ */}
+      {activeModule !== "monitor" && (
+        <div style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0 }}>
+          <header style={{
+            borderBottom: "1px solid rgba(255,255,255,0.06)", padding: "14px 24px",
+            display: "flex", alignItems: "flex-start", justifyContent: "space-between",
+            flexWrap: "wrap", gap: 12,
+            background: "rgba(255,255,255,0.02)", backdropFilter: "blur(12px)",
+            position: "sticky", top: 0, zIndex: 10,
+          }}>
+            <div>
+              <h1 style={{ fontSize: 16, fontWeight: 700, color: "#F9FAFB", margin: 0 }}>
+                {{ servers: "Inventaire serveurs", capacity: "Capacity Planning", todo: "TodoList", journal: "Journal des alertes", parametres: "Paramètres" }[activeModule] || activeModule}
+              </h1>
+              <p style={{ fontSize: 11, color: "#4B5563", margin: 0 }}>
+                {{ servers: "CPU, RAM et disque en temps réel par serveur", capacity: "Projections 6 mois · seuil critique 90% · recommandations", todo: "Tâches en cours · auto-générées + manuelles", journal: "Historique des événements · pannes · SSL · serveurs", parametres: "Configuration de l'application" }[activeModule] || ""}
+              </p>
+            </div>
+            {activeModule === "servers" && <ServerImport />}
+          </header>
+          <main style={{ flex: 1, padding: "20px 24px 48px", overflowY: "auto" }}>
+            {activeModule === "servers"  && <ServersView />}
+            {activeModule === "capacity" && <CapacityPlanning />}
+            {activeModule === "todo"     && <TodoList servers={allServers} allUrls={allUrls} />}
+          </main>
+        </div>
+      )}
+
+      {activeModule === "monitor" && (<>
+
+      <div style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0 }}>
+        <header style={{
+          borderBottom: "1px solid rgba(255,255,255,0.06)", padding: "14px 24px",
+          display: "flex", alignItems: "center", justifyContent: "space-between",
+          flexWrap: "wrap", gap: 12,
+          background: "rgba(255,255,255,0.02)", backdropFilter: "blur(12px)",
+          position: "sticky", top: 0, zIndex: 10,
+        }}>
+          <div>
+            <h1 style={{ fontSize: 16, fontWeight: 700, color: "#F9FAFB", margin: 0 }}>
+              {isAllView ? "Tous les sites" : (activeGroup?.name || "—")}
+            </h1>
+            <p style={{ fontSize: 11, color: "#4B5563", margin: 0 }}>
+              {totalOnline}/{allUrls.length} en ligne · {groups.length} groupe{groups.length > 1 ? "s" : ""}
+            </p>
+          </div>
+
+          <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+            <div style={{
+              display: "flex", alignItems: "center", gap: 7, padding: "5px 12px", borderRadius: 9,
+              background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.06)",
+            }}>
+              <span style={{ fontSize: 11, color: "#9CA3AF" }}>Intervalle</span>
+              <select value={interval} onChange={e => { setInterval_(+e.target.value); setCountdown(+e.target.value); }}
+                style={{ background: "transparent", border: "none", color: "#E5E7EB", fontSize: 12, fontFamily: "'JetBrains Mono', monospace", cursor: "pointer" }}>
+                {[10, 15, 30, 60, 120].map(v => <option key={v} value={v} style={{ background: "#1F2937" }}>{v}s</option>)}
+              </select>
+            </div>
+            <button onClick={() => setPaused(!paused)} style={{
+              display: "flex", alignItems: "center", gap: 5, padding: "5px 12px", borderRadius: 9,
+              background: paused ? "rgba(251,191,36,0.1)" : "rgba(52,211,153,0.1)",
+              border: `1px solid ${paused ? "rgba(251,191,36,0.2)" : "rgba(52,211,153,0.2)"}`,
+              color: paused ? "#FBBF24" : "#34D399", fontSize: 12, fontWeight: 600, cursor: "pointer",
+            }}>
+              {paused ? <Play size={13} /> : <Pause size={13} />}
+              {paused ? "Reprendre" : "Pause"}
+            </button>
+            <button onClick={runAllChecks} style={{
+              display: "flex", alignItems: "center", gap: 5, padding: "5px 12px", borderRadius: 9,
+              background: "rgba(99,102,241,0.1)", border: "1px solid rgba(99,102,241,0.2)",
+              color: "#A5B4FC", fontSize: 12, fontWeight: 600, cursor: "pointer",
+            }}>
+              <RefreshCw size={13} /> Vérifier tout
+            </button>
+            {!paused && (
+              <div style={{
+                padding: "5px 12px", borderRadius: 9, background: "rgba(99,102,241,0.08)",
+                border: "1px solid rgba(99,102,241,0.15)", fontSize: 12, color: "#818CF8",
+                fontFamily: "'JetBrains Mono', monospace", fontWeight: 600, minWidth: 52, textAlign: "center",
+              }}>
+                {countdown}s
+              </div>
+            )}
+          </div>
+        </header>
+
+
+        <main style={{ flex: 1, padding: "20px 24px 48px", overflowY: "auto" }}>
+          {/* ══ ONGLET SURVEILLANCE ══ */}
+          {mainTab === "surveillance" && (<>
+          <div style={{ display: "flex", gap: 10, marginBottom: 20, flexWrap: "wrap" }}>
+            <StatCard icon={Globe} label="URLs" value={groupUrls.length} accent="#6366F1" />
+            <StatCard icon={Wifi} label="Disponibilité" value={`${uptimePercent}%`} accent="#34D399" />
+            <StatCard icon={Zap} label="Moy. réponse" value={avgResponse > 0 ? `${avgResponse} ms` : "—"} accent="#FBBF24" />
+            <StatCard icon={WifiOff} label="Hors ligne" value={groupUrls.filter(u => getStatus(u) === STATUS.OFFLINE).length} accent="#F87171" />
+          </div>
+
+          {/* Filtre + vue toggle */}
+          <div style={{ display: "flex", gap: 8, marginBottom: 10, flexWrap: "wrap", alignItems: "center" }}>
+            <div style={{ display: "flex", borderRadius: 9, overflow: "hidden", border: "1px solid rgba(255,255,255,0.08)", flexShrink: 0 }}>
+              {[["grid", LayoutGrid], ["list", List]].map(([mode, Icon]) => (
+                <button key={mode} onClick={() => setViewMode(mode)} title={mode === "grid" ? "Vue grille" : "Vue liste"} style={{
+                  padding: "6px 10px", cursor: "pointer", display: "flex", alignItems: "center", border: "none",
+                  background: viewMode === mode ? "rgba(99,102,241,0.25)" : "rgba(255,255,255,0.03)",
+                  color: viewMode === mode ? "#A5B4FC" : "#4B5563", transition: "background 0.15s, color 0.15s",
+                }}><Icon size={14} /></button>
+              ))}
+            </div>
+            <div style={{ flex: 1, minWidth: 180, display: "flex", alignItems: "center", gap: 7,
+              background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.07)", borderRadius: 9, padding: "5px 12px" }}>
+              <Search size={13} color="#4B5563" style={{ flexShrink: 0 }} />
+              <input value={filterText} onChange={e => setFilterText(e.target.value)}
+                placeholder="Filtrer par URL ou domaine…"
+                style={{ flex: 1, background: "transparent", border: "none", color: "#E5E7EB", fontSize: 12,
+                  fontFamily: "'JetBrains Mono', monospace", outline: "none" }} />
+              {filterText && (
+                <button onClick={() => setFilterText("")} style={{ background: "none", border: "none", color: "#4B5563", cursor: "pointer", display: "flex", padding: 0 }}>
+                  <X size={12} />
+                </button>
+              )}
+            </div>
+            {[["all", "Tous"], ["online", "En ligne"], ["offline", "Hors ligne"]].map(([val, label]) => (
+              <button key={val} onClick={() => setFilterStatus(val)} style={{
+                padding: "6px 11px", borderRadius: 9, fontSize: 11, cursor: "pointer", fontWeight: filterStatus === val ? 700 : 400,
+                border: `1px solid ${filterStatus === val ? "rgba(99,102,241,0.4)" : "rgba(255,255,255,0.07)"}`,
+                background: filterStatus === val ? "rgba(99,102,241,0.18)" : "rgba(255,255,255,0.03)",
+                color: filterStatus === val ? "#A5B4FC" : "#6B7280", transition: "all 0.15s",
+              }}>{label}</button>
+            ))}
+            {(filterText || filterStatus !== "all") && (
+              <span style={{ fontSize: 11, color: "#4B5563", flexShrink: 0 }}>
+                {displayedUrls.length} / {groupUrls.length}
+              </span>
+            )}
+          </div>
+
+          {/* Ajout d’URL (masqué en vue globale) */}
+          {!isAllView && (
+            <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap", alignItems: "center" }}>
+              <div style={{
+                display: "flex", flex: 1, minWidth: 260, gap: 8,
+                background: "rgba(255,255,255,0.025)", border: "1px solid rgba(255,255,255,0.07)",
+                borderRadius: 11, padding: 5,
+              }}>
+                <input value={input} onChange={e => setInput(e.target.value)} onKeyDown={e => e.key === "Enter" && addUrl()}
+                  placeholder={`Ajouter une URL dans « ${activeGroup?.name || "..."} »`}
+                  style={{ flex: 1, background: "transparent", border: "none", color: "#E5E7EB", padding: "8px 12px", fontSize: 13, fontFamily: "'JetBrains Mono', monospace" }} />
+                <button onClick={addUrl} style={{
+                  display: "flex", alignItems: "center", gap: 5, padding: "8px 18px", borderRadius: 8,
+                  background: "linear-gradient(135deg, #6366F1, #7C3AED)", border: "none", color: "#fff",
+                  fontSize: 12, fontWeight: 600, cursor: "pointer", boxShadow: "0 2px 10px rgba(99,102,241,0.3)",
+                }}>
+                  <Plus size={14} /> Ajouter
+                </button>
+              </div>
+              <ExcelImport onImport={handleExcelImport} />
+            </div>
+          )}
+
+          {displayedUrls.length === 0 ? (
+            <div style={{
+              textAlign: "center", padding: "60px 20px", color: "#4B5563",
+              background: "rgba(255,255,255,0.02)", borderRadius: 14, border: "1px dashed rgba(255,255,255,0.08)",
+            }}>
+              <Globe size={36} style={{ marginBottom: 10, opacity: 0.3 }} />
+              {(filterText || filterStatus !== "all") ? (
+                <>
+                  <p style={{ fontSize: 14, marginBottom: 8 }}>Aucun résultat pour ce filtre</p>
+                  <button onClick={() => { setFilterText(""); setFilterStatus("all"); }} style={{
+                    padding: "6px 14px", borderRadius: 8, border: "1px solid rgba(99,102,241,0.3)",
+                    background: "rgba(99,102,241,0.1)", color: "#A5B4FC", fontSize: 12, cursor: "pointer",
+                  }}>Effacer les filtres</button>
+                </>
+              ) : (
+                <>
+                  <p style={{ fontSize: 14, marginBottom: 4 }}>Aucune URL dans ce groupe</p>
+                  <p style={{ fontSize: 12 }}>Ajoutez une URL ou importez un fichier Excel.</p>
+                </>
+              )}
+            </div>
+          ) : (
+            <div style={viewMode === "grid"
+              ? { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(320px, 1fr))", gap: 14 }
+              : { display: "flex", flexDirection: "column", gap: 6 }
+            }>
+              {displayedUrls.map((entry, i) => {
+                const gId = entry._groupId || activeGroupId;
+                const isDragTarget = dragOverId === entry.id;
+                return (
+                  <div
+                    key={entry.id}
+                    draggable={!isAllView}
+                    onDragStart={() => { dragRef.current = { groupId: gId, urlId: entry.id }; }}
+                    onDragEnd={() => { dragRef.current = null; setDragOverId(null); }}
+                    onDragOver={e => { e.preventDefault(); if (!isAllView) setDragOverId(entry.id); }}
+                    onDragLeave={() => setDragOverId(null)}
+                    onDrop={e => {
+                      e.preventDefault();
+                      setDragOverId(null);
+                      const d = dragRef.current;
+                      if (d && d.groupId === gId) moveUrl(gId, d.urlId, entry.id);
+                    }}
+                    style={{
+                      animation: `fadeIn 0.3s ease ${i * 0.04}s both`,
+                      cursor: isAllView ? "default" : "grab",
+                      outline: isDragTarget ? "2px solid rgba(99,102,241,0.6)" : "none",
+                      borderRadius: 14,
+                      transition: "outline 0.1s, transform 0.1s",
+                      transform: isDragTarget ? "scale(1.01)" : "scale(1)",
+                    }}>
+                    <UrlCard
+                      entry={entry}
+                      index={i}
+                      viewMode={viewMode}
+                      groupName={isAllView ? entry._groupName : null}
+                      onRemove={() => removeUrl(gId, entry.id)}
+                      onCheck={() => {
+                        runCheck(gId, entry.id, entry.url);
+                        runSslCheck(gId, entry.id, entry.url, true);
+                      }}
+                      checking={checkingIds.has(entry.id)}
+                      onUpdateCredentials={(creds) => updateCredentials(gId, entry.id, creds)}
+                      onUpdateUrl={(newUrl) => updateUrl(gId, entry.id, newUrl)}
+                      onTogglePause={() => togglePauseUrl(gId, entry.id)}
+                    />
+                  </div>
+                );
+              })}
+            </div>
+          )}
+          </>)}
+
+          {/* ══ ONGLET JOURNAL ══ */}
+          {mainTab === "journal" && (
+            <IncidentLogPage
+              log={incidentLog}
+              onClear={() => { setIncidentLog([]); localStorage.removeItem("url-monitor-incidents"); }}
+            />
+          )}
+
+          {/* ══ ONGLET PARAMÈTRES ══ */}
+          {mainTab === "parametres" && (() => {
+            const sectionHead = (icon, label) => (
+              <div style={{ padding: "13px 18px", borderBottom: "1px solid rgba(255,255,255,0.06)",
+                display: "flex", alignItems: "center", gap: 8 }}>
+                <div style={{ opacity: 0.5 }}>{icon}</div>
+                <span style={{ fontSize: 11, fontWeight: 700, color: "#9CA3AF",
+                  letterSpacing: "0.08em", textTransform: "uppercase" }}>{label}</span>
+              </div>
+            );
+            const row = (left, right) => (
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between",
+                padding: "13px 18px", borderBottom: "1px solid rgba(255,255,255,0.04)" }}>
+                {left}{right}
+              </div>
+            );
+            const labelPair = (title, sub) => (
+              <div>
+                <div style={{ fontSize: 13, fontWeight: 600, color: "#E5E7EB", marginBottom: 3 }}>{title}</div>
+                <div style={{ fontSize: 11, color: "#6B7280" }}>{sub}</div>
+              </div>
+            );
+            /* URLs avec SSL critique (≤ 10j) */
+            const sslWarnings = allUrls
+              .filter(u => u.sslInfo?.daysLeft != null && u.sslInfo.daysLeft <= 10)
+              .sort((a, b) => a.sslInfo.daysLeft - b.sslInfo.daysLeft);
+
+            return (
+              <div style={{ maxWidth: 820, margin: "0 auto", display: "flex", flexDirection: "column", gap: 14 }}>
+
+                {/* Vérification */}
+                <div style={{ background: "rgba(255,255,255,0.025)", border: "1px solid rgba(255,255,255,0.07)", borderRadius: 14, overflow: "hidden" }}>
+                  {sectionHead(<RefreshCw size={14} />, "Vérification")}
+                  {row(
+                    labelPair("Intervalle", "Fréquence des checks automatiques"),
+                    <select value={interval} onChange={e => { setInterval_(+e.target.value); setCountdown(+e.target.value); }}
+                      style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8,
+                        color: "#E5E7EB", fontSize: 13, padding: "6px 12px", cursor: "pointer",
+                        fontFamily: "'JetBrains Mono', monospace" }}>
+                      {[10, 15, 30, 60, 120, 300].map(v => (
+                        <option key={v} value={v} style={{ background: "#1F2937" }}>
+                          {v >= 60 ? `${v / 60}min` : `${v}s`}
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                  {row(
+                    labelPair("Surveillance", paused ? "⏸ En pause" : `▶ Prochain check dans ${countdown}s`),
+                    <button onClick={() => setPaused(!paused)} style={{
+                      display: "flex", alignItems: "center", gap: 6, padding: "7px 18px", borderRadius: 20,
+                      background: paused ? "rgba(251,191,36,0.1)" : "rgba(52,211,153,0.1)",
+                      border: `1px solid ${paused ? "rgba(251,191,36,0.3)" : "rgba(52,211,153,0.3)"}`,
+                      color: paused ? "#FBBF24" : "#34D399", fontSize: 12, fontWeight: 700, cursor: "pointer",
+                    }}>
+                      {paused ? <><Play size={13} /> Reprendre</> : <><Pause size={13} /> Pause</>}
+                    </button>
+                  )}
+                  <div style={{ padding: "8px 18px 12px" }}>
+                    <button onClick={runAllChecks} style={{
+                      display: "flex", alignItems: "center", gap: 6, padding: "7px 18px", borderRadius: 20,
+                      background: "rgba(99,102,241,0.1)", border: "1px solid rgba(99,102,241,0.25)",
+                      color: "#A5B4FC", fontSize: 12, fontWeight: 700, cursor: "pointer",
+                    }}>
+                      <RefreshCw size={13} /> Vérifier tout maintenant
+                    </button>
+                  </div>
+                </div>
+
+                {/* Notifications */}
+                <div style={{ background: "rgba(255,255,255,0.025)", border: "1px solid rgba(255,255,255,0.07)", borderRadius: 14, overflow: "hidden" }}>
+                  {sectionHead(<Bell size={14} />, "Notifications")}
+                  {row(
+                    labelPair(
+                      "Notifications navigateur",
+                      typeof Notification === "undefined" ? "Non supporté"
+                        : Notification.permission === "denied" ? "🚫 Bloquées — autorisez dans les réglages du navigateur"
+                        : Notification.permission === "granted" ? "✅ Autorisées et actives"
+                        : "Non encore demandées"
+                    ),
+                    <button
+                      disabled={typeof Notification === "undefined" || Notification.permission === "denied"}
+                      onClick={() => {
+                        if (Notification.permission !== "granted")
+                          Notification.requestPermission().then(p => setNotifEnabled(p === "granted"));
+                      }}
+                      style={{
+                        display: "flex", alignItems: "center", gap: 6, padding: "7px 18px", borderRadius: 20,
+                        background: notifEnabled ? "rgba(52,211,153,0.1)" : "rgba(255,255,255,0.05)",
+                        border: `1px solid ${notifEnabled ? "rgba(52,211,153,0.3)" : "rgba(255,255,255,0.12)"}`,
+                        color: notifEnabled ? "#34D399" : "#6B7280", fontSize: 12, fontWeight: 700, cursor: "pointer",
+                        opacity: typeof Notification === "undefined" || Notification.permission === "denied" ? 0.4 : 1,
+                      }}>
+                      {notifEnabled ? <><Bell size={13} /> Activées</> : <><BellOff size={13} /> Activer</>}
+                    </button>
+                  )}
+                </div>
+
+                {/* Certificats SSL */}
+                <div style={{ background: "rgba(255,255,255,0.025)", border: `1px solid ${sslWarnings.length > 0 ? "rgba(251,191,36,0.25)" : "rgba(255,255,255,0.07)"}`, borderRadius: 14, overflow: "hidden" }}>
+                  {sectionHead(<Lock size={14} />, `Certificats SSL${sslWarnings.length > 0 ? ` — ${sslWarnings.length} en alerte` : ""}`)}
+                  {sslWarnings.length === 0 ? (
+                    <div style={{ padding: "16px 18px", display: "flex", alignItems: "center", gap: 8 }}>
+                      <CheckCircle size={14} color="#34D399" />
+                      <span style={{ fontSize: 12, color: "#6B7280" }}>Tous les certificats sont valides (&gt; 10 jours)</span>
+                    </div>
+                  ) : sslWarnings.map(u => {
+                    const d = u.sslInfo.daysLeft;
+                    const clr = d <= 0 ? "#F87171" : d <= 3 ? "#F87171" : "#FBBF24";
+                    const bg  = d <= 3 ? "rgba(248,113,113,0.08)" : "rgba(251,191,36,0.06)";
+                    return (
+                      <div key={u.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: "11px 18px",
+                        borderBottom: "1px solid rgba(255,255,255,0.04)", background: bg }}>
+                        <Lock size={13} color={clr} style={{ flexShrink: 0 }} />
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontSize: 13, fontWeight: 600, color: "#E5E7EB",
+                            overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                            {(() => { try { return new URL(u.url).hostname; } catch { return u.url; } })()}
+                          </div>
+                          <div style={{ fontSize: 10, color: "#6B7280", fontFamily: "'JetBrains Mono', monospace" }}>
+                            {u.sslInfo.issuer || "Émetteur inconnu"}
+                            {u.sslInfo.notAfter && ` · expire le ${new Date(u.sslInfo.notAfter).toLocaleDateString("fr-FR")}`}
+                          </div>
+                        </div>
+                        <span style={{ fontSize: 11, fontWeight: 700, color: clr, padding: "3px 10px",
+                          borderRadius: 20, background: d <= 3 ? "rgba(248,113,113,0.12)" : "rgba(251,191,36,0.12)",
+                          border: `1px solid ${d <= 3 ? "rgba(248,113,113,0.3)" : "rgba(251,191,36,0.3)"}`,
+                          flexShrink: 0 }}>
+                          {d <= 0 ? "Expiré" : `${d}j`}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* Serveurs & Capacity Planning */}
+                <div style={{ background: "rgba(255,255,255,0.025)", border: "1px solid rgba(255,255,255,0.07)", borderRadius: 14, overflow: "hidden" }}>
+                  {sectionHead(<Server size={14} />, "Serveurs & Capacity Planning")}
+                  {row(labelPair("Seuil CPU", "Déclenche une alerte journal au-delà de ce seuil"),
+                    <select value={capacitySettings.cpuThreshold} onChange={e => { const s = {...capacitySettings, cpuThreshold: +e.target.value}; setCapacitySettings(s); saveCapacitySettings(s); }} style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8, color: "#E5E7EB", fontSize: 13, padding: "6px 12px", cursor: "pointer", fontFamily: "'JetBrains Mono', monospace" }}>
+                      {[70, 75, 80, 85, 90, 95].map(v => <option key={v} value={v} style={{ background: "#1F2937" }}>{v}%</option>)}
+                    </select>
+                  )}
+                  {row(labelPair("Seuil RAM", "Déclenche une alerte journal au-delà de ce seuil"),
+                    <select value={capacitySettings.ramThreshold} onChange={e => { const s = {...capacitySettings, ramThreshold: +e.target.value}; setCapacitySettings(s); saveCapacitySettings(s); }} style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8, color: "#E5E7EB", fontSize: 13, padding: "6px 12px", cursor: "pointer", fontFamily: "'JetBrains Mono', monospace" }}>
+                      {[70, 75, 80, 85, 90, 95].map(v => <option key={v} value={v} style={{ background: "#1F2937" }}>{v}%</option>)}
+                    </select>
+                  )}
+                  {row(labelPair("Seuil Disque", "Déclenche une alerte journal au-delà de ce seuil"),
+                    <select value={capacitySettings.diskThreshold} onChange={e => { const s = {...capacitySettings, diskThreshold: +e.target.value}; setCapacitySettings(s); saveCapacitySettings(s); }} style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8, color: "#E5E7EB", fontSize: 13, padding: "6px 12px", cursor: "pointer", fontFamily: "'JetBrains Mono', monospace" }}>
+                      {[70, 75, 80, 85, 90, 95].map(v => <option key={v} value={v} style={{ background: "#1F2937" }}>{v}%</option>)}
+                    </select>
+                  )}
+                  <div style={{ padding: "8px 18px 12px" }}>
+                    <button onClick={() => clearSnapshots()} style={{ display: "flex", alignItems: "center", gap: 6, padding: "7px 18px", borderRadius: 20, background: "rgba(248,113,113,0.08)", border: "1px solid rgba(248,113,113,0.25)", color: "#F87171", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>
+                      <RefreshCw size={13} /> Réinitialiser les snapshots
+                    </button>
+                  </div>
+                </div>
+
+                {/* Données */}
+                <div style={{ background: "rgba(255,255,255,0.025)", border: "1px solid rgba(255,255,255,0.07)", borderRadius: 14, overflow: "hidden" }}>
+                  {sectionHead(<Zap size={14} />, "Données & Stockage")}
+                  {row(
+                    labelPair("Historique des vérifications", `500 points max par URL · ${allUrls.length} URL${allUrls.length > 1 ? "s" : ""} surveillée${allUrls.length > 1 ? "s" : ""}`),
+                    <span style={{ fontSize: 12, fontFamily: "'JetBrains Mono', monospace", color: "#818CF8", fontWeight: 700 }}>
+                      {allUrls.reduce((s, u) => s + (u.history?.length || 0), 0)} pts
+                    </span>
+                  )}
+                  {row(
+                    labelPair("Journal d'incidents", `${incidentLog.length} / 200 événements enregistrés`),
+                    <button onClick={() => { setIncidentLog([]); localStorage.removeItem("url-monitor-incidents"); }} style={{
+                      fontSize: 11, padding: "5px 14px", borderRadius: 20,
+                      background: "rgba(248,113,113,0.08)", border: "1px solid rgba(248,113,113,0.25)",
+                      color: "#F87171", cursor: "pointer", fontWeight: 600,
+                    }}>Vider</button>
+                  )}
+                </div>
+
+                <div style={{ textAlign: "center", fontSize: 10, color: "#374151", padding: "4px 0" }}>
+                  URL Monitor Live · données persistantes dans localStorage
+                </div>
+              </div>
+            );
+          })()}
+        </main>
+      </div>
+      </>)}
+
+      <Toast toasts={toasts} onDismiss={dismissToast} />
+    </div>
+  );
+}
