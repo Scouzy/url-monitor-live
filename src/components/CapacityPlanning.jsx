@@ -53,7 +53,7 @@ export default function CapacityPlanning() {
   const breach = trend.find(t => (t.projection ?? 0) >= 90);
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 16, maxWidth: 1100, margin: "0 auto" }}>
+    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
 
       {/* Switch métrique */}
       <div style={{ display: "flex", gap: 8 }}>

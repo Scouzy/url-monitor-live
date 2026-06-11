@@ -16,6 +16,7 @@ import ServerImport from "./components/ServerImport";
 import TodoList from "./components/TodoList";
 import WorkflowEditor from "./components/WorkflowEditor";
 import AppImpactMap from "./components/AppImpactMap";
+import SettingsPage from "./components/SettingsPage";
 import { subscribeServers, getServers, recommendations as getRecos } from "./utils/servers";
 import { loadCapacitySettings, saveCapacitySettings } from "./utils/capacitySettings";
 import { loadTodos } from "./utils/todoStorage";
@@ -652,189 +653,25 @@ export default function App() {
           )}
 
           {/* ══ ONGLET PARAMÈTRES ══ */}
-          {mainTab === "parametres" && (() => {
-            const sectionHead = (icon, label) => (
-              <div style={{ padding: "13px 18px", borderBottom: "1px solid rgba(255,255,255,0.06)",
-                display: "flex", alignItems: "center", gap: 8 }}>
-                <div style={{ opacity: 0.5 }}>{icon}</div>
-                <span style={{ fontSize: 11, fontWeight: 700, color: "#9CA3AF",
-                  letterSpacing: "0.08em", textTransform: "uppercase" }}>{label}</span>
-              </div>
-            );
-            const row = (left, right) => (
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between",
-                padding: "13px 18px", borderBottom: "1px solid rgba(255,255,255,0.04)" }}>
-                {left}{right}
-              </div>
-            );
-            const labelPair = (title, sub) => (
-              <div>
-                <div style={{ fontSize: 13, fontWeight: 600, color: "#E5E7EB", marginBottom: 3 }}>{title}</div>
-                <div style={{ fontSize: 11, color: "#6B7280" }}>{sub}</div>
-              </div>
-            );
-            /* URLs avec SSL critique (≤ 10j) */
-            const sslWarnings = allUrls
-              .filter(u => u.sslInfo?.daysLeft != null && u.sslInfo.daysLeft <= 10)
-              .sort((a, b) => a.sslInfo.daysLeft - b.sslInfo.daysLeft);
-
-            return (
-              <div style={{ maxWidth: 820, margin: "0 auto", display: "flex", flexDirection: "column", gap: 14 }}>
-
-                {/* Vérification */}
-                <div style={{ background: "rgba(255,255,255,0.025)", border: "1px solid rgba(255,255,255,0.07)", borderRadius: 14, overflow: "hidden" }}>
-                  {sectionHead(<RefreshCw size={14} />, "Vérification")}
-                  {row(
-                    labelPair("Intervalle", "Fréquence des checks automatiques"),
-                    <select value={interval} onChange={e => { setInterval_(+e.target.value); setCountdown(+e.target.value); }}
-                      style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8,
-                        color: "#E5E7EB", fontSize: 13, padding: "6px 12px", cursor: "pointer",
-                        fontFamily: "'JetBrains Mono', monospace" }}>
-                      {[10, 15, 30, 60, 120, 300].map(v => (
-                        <option key={v} value={v} style={{ background: "#1F2937" }}>
-                          {v >= 60 ? `${v / 60}min` : `${v}s`}
-                        </option>
-                      ))}
-                    </select>
-                  )}
-                  {row(
-                    labelPair("Surveillance", paused ? "⏸ En pause" : `▶ Prochain check dans ${countdown}s`),
-                    <button onClick={() => setPaused(!paused)} style={{
-                      display: "flex", alignItems: "center", gap: 6, padding: "7px 18px", borderRadius: 20,
-                      background: paused ? "rgba(251,191,36,0.1)" : "rgba(52,211,153,0.1)",
-                      border: `1px solid ${paused ? "rgba(251,191,36,0.3)" : "rgba(52,211,153,0.3)"}`,
-                      color: paused ? "#FBBF24" : "#34D399", fontSize: 12, fontWeight: 700, cursor: "pointer",
-                    }}>
-                      {paused ? <><Play size={13} /> Reprendre</> : <><Pause size={13} /> Pause</>}
-                    </button>
-                  )}
-                  <div style={{ padding: "8px 18px 12px" }}>
-                    <button onClick={runAllChecks} style={{
-                      display: "flex", alignItems: "center", gap: 6, padding: "7px 18px", borderRadius: 20,
-                      background: "rgba(99,102,241,0.1)", border: "1px solid rgba(99,102,241,0.25)",
-                      color: "#A5B4FC", fontSize: 12, fontWeight: 700, cursor: "pointer",
-                    }}>
-                      <RefreshCw size={13} /> Vérifier tout maintenant
-                    </button>
-                  </div>
-                </div>
-
-                {/* Notifications */}
-                <div style={{ background: "rgba(255,255,255,0.025)", border: "1px solid rgba(255,255,255,0.07)", borderRadius: 14, overflow: "hidden" }}>
-                  {sectionHead(<Bell size={14} />, "Notifications")}
-                  {row(
-                    labelPair(
-                      "Notifications navigateur",
-                      typeof Notification === "undefined" ? "Non supporté"
-                        : Notification.permission === "denied" ? "🚫 Bloquées — autorisez dans les réglages du navigateur"
-                        : Notification.permission === "granted" ? "✅ Autorisées et actives"
-                        : "Non encore demandées"
-                    ),
-                    <button
-                      disabled={typeof Notification === "undefined" || Notification.permission === "denied"}
-                      onClick={() => {
-                        if (Notification.permission !== "granted")
-                          Notification.requestPermission().then(p => setNotifEnabled(p === "granted"));
-                      }}
-                      style={{
-                        display: "flex", alignItems: "center", gap: 6, padding: "7px 18px", borderRadius: 20,
-                        background: notifEnabled ? "rgba(52,211,153,0.1)" : "rgba(255,255,255,0.05)",
-                        border: `1px solid ${notifEnabled ? "rgba(52,211,153,0.3)" : "rgba(255,255,255,0.12)"}`,
-                        color: notifEnabled ? "#34D399" : "#6B7280", fontSize: 12, fontWeight: 700, cursor: "pointer",
-                        opacity: typeof Notification === "undefined" || Notification.permission === "denied" ? 0.4 : 1,
-                      }}>
-                      {notifEnabled ? <><Bell size={13} /> Activées</> : <><BellOff size={13} /> Activer</>}
-                    </button>
-                  )}
-                </div>
-
-                {/* Certificats SSL */}
-                <div style={{ background: "rgba(255,255,255,0.025)", border: `1px solid ${sslWarnings.length > 0 ? "rgba(251,191,36,0.25)" : "rgba(255,255,255,0.07)"}`, borderRadius: 14, overflow: "hidden" }}>
-                  {sectionHead(<Lock size={14} />, `Certificats SSL${sslWarnings.length > 0 ? ` — ${sslWarnings.length} en alerte` : ""}`)}
-                  {sslWarnings.length === 0 ? (
-                    <div style={{ padding: "16px 18px", display: "flex", alignItems: "center", gap: 8 }}>
-                      <CheckCircle size={14} color="#34D399" />
-                      <span style={{ fontSize: 12, color: "#6B7280" }}>Tous les certificats sont valides (&gt; 10 jours)</span>
-                    </div>
-                  ) : sslWarnings.map(u => {
-                    const d = u.sslInfo.daysLeft;
-                    const clr = d <= 0 ? "#F87171" : d <= 3 ? "#F87171" : "#FBBF24";
-                    const bg  = d <= 3 ? "rgba(248,113,113,0.08)" : "rgba(251,191,36,0.06)";
-                    return (
-                      <div key={u.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: "11px 18px",
-                        borderBottom: "1px solid rgba(255,255,255,0.04)", background: bg }}>
-                        <Lock size={13} color={clr} style={{ flexShrink: 0 }} />
-                        <div style={{ flex: 1, minWidth: 0 }}>
-                          <div style={{ fontSize: 13, fontWeight: 600, color: "#E5E7EB",
-                            overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                            {(() => { try { return new URL(u.url).hostname; } catch { return u.url; } })()}
-                          </div>
-                          <div style={{ fontSize: 10, color: "#6B7280", fontFamily: "'JetBrains Mono', monospace" }}>
-                            {u.sslInfo.issuer || "Émetteur inconnu"}
-                            {u.sslInfo.notAfter && ` · expire le ${new Date(u.sslInfo.notAfter).toLocaleDateString("fr-FR")}`}
-                          </div>
-                        </div>
-                        <span style={{ fontSize: 11, fontWeight: 700, color: clr, padding: "3px 10px",
-                          borderRadius: 20, background: d <= 3 ? "rgba(248,113,113,0.12)" : "rgba(251,191,36,0.12)",
-                          border: `1px solid ${d <= 3 ? "rgba(248,113,113,0.3)" : "rgba(251,191,36,0.3)"}`,
-                          flexShrink: 0 }}>
-                          {d <= 0 ? "Expiré" : `${d}j`}
-                        </span>
-                      </div>
-                    );
-                  })}
-                </div>
-
-                {/* Serveurs & Capacity Planning */}
-                <div style={{ background: "rgba(255,255,255,0.025)", border: "1px solid rgba(255,255,255,0.07)", borderRadius: 14, overflow: "hidden" }}>
-                  {sectionHead(<Server size={14} />, "Serveurs & Capacity Planning")}
-                  {row(labelPair("Seuil CPU", "Déclenche une alerte journal au-delà de ce seuil"),
-                    <select value={capacitySettings.cpuThreshold} onChange={e => { const s = {...capacitySettings, cpuThreshold: +e.target.value}; setCapacitySettings(s); saveCapacitySettings(s); }} style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8, color: "#E5E7EB", fontSize: 13, padding: "6px 12px", cursor: "pointer", fontFamily: "'JetBrains Mono', monospace" }}>
-                      {[70, 75, 80, 85, 90, 95].map(v => <option key={v} value={v} style={{ background: "#1F2937" }}>{v}%</option>)}
-                    </select>
-                  )}
-                  {row(labelPair("Seuil RAM", "Déclenche une alerte journal au-delà de ce seuil"),
-                    <select value={capacitySettings.ramThreshold} onChange={e => { const s = {...capacitySettings, ramThreshold: +e.target.value}; setCapacitySettings(s); saveCapacitySettings(s); }} style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8, color: "#E5E7EB", fontSize: 13, padding: "6px 12px", cursor: "pointer", fontFamily: "'JetBrains Mono', monospace" }}>
-                      {[70, 75, 80, 85, 90, 95].map(v => <option key={v} value={v} style={{ background: "#1F2937" }}>{v}%</option>)}
-                    </select>
-                  )}
-                  {row(labelPair("Seuil Disque", "Déclenche une alerte journal au-delà de ce seuil"),
-                    <select value={capacitySettings.diskThreshold} onChange={e => { const s = {...capacitySettings, diskThreshold: +e.target.value}; setCapacitySettings(s); saveCapacitySettings(s); }} style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8, color: "#E5E7EB", fontSize: 13, padding: "6px 12px", cursor: "pointer", fontFamily: "'JetBrains Mono', monospace" }}>
-                      {[70, 75, 80, 85, 90, 95].map(v => <option key={v} value={v} style={{ background: "#1F2937" }}>{v}%</option>)}
-                    </select>
-                  )}
-                  <div style={{ padding: "8px 18px 12px" }}>
-                    <button onClick={() => clearSnapshots()} style={{ display: "flex", alignItems: "center", gap: 6, padding: "7px 18px", borderRadius: 20, background: "rgba(248,113,113,0.08)", border: "1px solid rgba(248,113,113,0.25)", color: "#F87171", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>
-                      <RefreshCw size={13} /> Réinitialiser les snapshots
-                    </button>
-                  </div>
-                </div>
-
-                {/* Données */}
-                <div style={{ background: "rgba(255,255,255,0.025)", border: "1px solid rgba(255,255,255,0.07)", borderRadius: 14, overflow: "hidden" }}>
-                  {sectionHead(<Zap size={14} />, "Données & Stockage")}
-                  {row(
-                    labelPair("Historique des vérifications", `500 points max par URL · ${allUrls.length} URL${allUrls.length > 1 ? "s" : ""} surveillée${allUrls.length > 1 ? "s" : ""}`),
-                    <span style={{ fontSize: 12, fontFamily: "'JetBrains Mono', monospace", color: "#818CF8", fontWeight: 700 }}>
-                      {allUrls.reduce((s, u) => s + (u.history?.length || 0), 0)} pts
-                    </span>
-                  )}
-                  {row(
-                    labelPair("Journal d'incidents", `${incidentLog.length} / 200 événements enregistrés`),
-                    <button onClick={() => { setIncidentLog([]); localStorage.removeItem("url-monitor-incidents"); }} style={{
-                      fontSize: 11, padding: "5px 14px", borderRadius: 20,
-                      background: "rgba(248,113,113,0.08)", border: "1px solid rgba(248,113,113,0.25)",
-                      color: "#F87171", cursor: "pointer", fontWeight: 600,
-                    }}>Vider</button>
-                  )}
-                </div>
-
-                <div style={{ textAlign: "center", fontSize: 10, color: "#374151", padding: "4px 0" }}>
-                  URL Monitor Live · données persistantes dans localStorage
-                </div>
-              </div>
-            );
-          })()}
+          {mainTab === "parametres" && (
+            <SettingsPage
+              interval={interval}
+              setInterval_={setInterval_}
+              countdown={countdown}
+              paused={paused}
+              setPaused={setPaused}
+              runAllChecks={runAllChecks}
+              notifEnabled={notifEnabled}
+              setNotifEnabled={setNotifEnabled}
+              capacitySettings={capacitySettings}
+              setCapacitySettings={setCapacitySettings}
+              allUrls={allUrls}
+              incidentLog={incidentLog}
+              setIncidentLog={setIncidentLog}
+              allServers={allServers}
+              onNavigate={(mod) => { setActiveModule(mod); setMainTab("surveillance"); }}
+            />
+          )}
         </main>
       </div>
       </>)}
