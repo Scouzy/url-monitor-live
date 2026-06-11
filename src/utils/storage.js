@@ -92,6 +92,11 @@ export function importGroupsJson(jsonText) {
   return applyMigration(deserializeGroups(parsed));
 }
 
+export function importGroupsArray(arr) {
+  if (!Array.isArray(arr)) throw new Error('Format invalide');
+  return applyMigration(deserializeGroups(arr));
+}
+
 export function getDefaultGroups() {
   return [
     {

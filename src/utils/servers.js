@@ -329,6 +329,25 @@ export function setServers(rawList, source, label) {
   return servers.length;
 }
 
+/* ── Sauvegarde/restauration complète (export/import JSON) ── */
+export function getServersBackup() {
+  try {
+    const raw = localStorage.getItem(LS_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch { return null; }
+}
+
+export function restoreServersBackup(backup) {
+  if (!backup || !Array.isArray(backup.rows) || backup.rows.length === 0) return false;
+  try {
+    localStorage.setItem(LS_KEY, JSON.stringify(backup));
+    _meta  = backup.meta || { source: "excel", loadedAt: null, label: null };
+    _cache = backup.rows.map((r, i) => normalizeServer(r, i));
+    _listeners.forEach(fn => fn());
+    return true;
+  } catch { return false; }
+}
+
 export function resetServers() {
   localStorage.removeItem(LS_KEY);
   clearSnapshots();

@@ -5,13 +5,29 @@ import {
   Server, BarChart3, MonitorCheck, AlertTriangle, Settings, ClipboardList,
 } from "lucide-react";
 import { getStatus, STATUS } from "../constants";
-import { exportGroupsJson, importGroupsJson } from "../utils/storage";
+import { importGroupsJson, importGroupsArray } from "../utils/storage";
+import { getServersBackup, restoreServersBackup } from "../utils/servers";
+import { loadTodos, saveTodos } from "../utils/todoStorage";
 
 function ExportImportButtons({ groups, onImport }) {
   const fileRef = useRef(null);
   const [msg, setMsg] = useState(null);
 
-  const handleExport = () => exportGroupsJson(groups);
+  const handleExport = () => {
+    const backup = {
+      version: 2,
+      exportedAt: new Date().toISOString(),
+      groups,
+      servers: getServersBackup(),
+      todos: loadTodos(),
+    };
+    const blob = new Blob([JSON.stringify(backup, null, 2)], { type: "application/json" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `url-monitor-backup-${new Date().toISOString().slice(0, 10)}.json`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  };
 
   const handleImport = (e) => {
     const file = e.target.files?.[0];
@@ -19,13 +35,36 @@ function ExportImportButtons({ groups, onImport }) {
     const reader = new FileReader();
     reader.onload = (ev) => {
       try {
-        const imported = importGroupsJson(ev.target.result);
-        onImport(imported);
-        setMsg({ ok: true, text: `${imported.reduce((s, g) => s + g.urls.length, 0)} URLs restaurées` });
+        const parsed = JSON.parse(ev.target.result);
+        let importedGroups, importedServers = null, importedTodos = null;
+
+        if (Array.isArray(parsed)) {
+          /* Ancien format (v1) — tableau de groupes uniquement */
+          importedGroups = importGroupsJson(ev.target.result);
+        } else if (parsed.version === 2 && parsed.groups) {
+          /* Nouveau format (v2) — sauvegarde complète */
+          importedGroups  = importGroupsArray(parsed.groups);
+          importedServers = (parsed.servers?.rows) ? parsed.servers : null;
+          importedTodos   = Array.isArray(parsed.todos) ? parsed.todos : null;
+        } else {
+          throw new Error("Format invalide");
+        }
+
+        onImport(importedGroups);
+        if (importedServers) restoreServersBackup(importedServers);
+        if (importedTodos)   saveTodos(importedTodos);
+
+        const urlCount    = importedGroups.reduce((s, g) => s + (g.urls?.length || 0), 0);
+        const serverCount = importedServers?.rows?.length || 0;
+        const todoCount   = importedTodos?.length   || 0;
+        const parts = [`${urlCount} URL${urlCount > 1 ? "s" : ""}`];
+        if (serverCount) parts.push(`${serverCount} serveur${serverCount > 1 ? "s" : ""}`);
+        if (todoCount)   parts.push(`${todoCount} tâche${todoCount > 1 ? "s" : ""}`);
+        setMsg({ ok: true, text: parts.join(" · ") + " restaurés" });
       } catch {
         setMsg({ ok: false, text: "Fichier invalide" });
       }
-      setTimeout(() => setMsg(null), 4000);
+      setTimeout(() => setMsg(null), 5000);
     };
     reader.readAsText(file);
     e.target.value = "";
