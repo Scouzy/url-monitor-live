@@ -14,6 +14,8 @@ import ServersView from "./components/ServersView";
 import CapacityPlanning from "./components/CapacityPlanning";
 import ServerImport from "./components/ServerImport";
 import TodoList from "./components/TodoList";
+import WorkflowEditor from "./components/WorkflowEditor";
+import AppImpactMap from "./components/AppImpactMap";
 import { subscribeServers, getServers, recommendations as getRecos } from "./utils/servers";
 import { loadCapacitySettings, saveCapacitySettings } from "./utils/capacitySettings";
 import { loadTodos } from "./utils/todoStorage";
@@ -419,18 +421,20 @@ export default function App() {
           }}>
             <div>
               <h1 style={{ fontSize: 16, fontWeight: 700, color: "#F9FAFB", margin: 0 }}>
-                {{ servers: "Inventaire serveurs", capacity: "Capacity Planning", todo: "TodoList", journal: "Journal des alertes", parametres: "Paramètres" }[activeModule] || activeModule}
+                {{ servers: "Inventaire serveurs", capacity: "Capacity Planning", todo: "TodoList", workflows: "Workflows", impacts: "Impacts Applicatifs", journal: "Journal des alertes", parametres: "Paramètres" }[activeModule] || activeModule}
               </h1>
               <p style={{ fontSize: 11, color: "#4B5563", margin: 0 }}>
-                {{ servers: "CPU, RAM et disque en temps réel par serveur", capacity: "Projections 6 mois · seuil critique 90% · recommandations", todo: "Tâches en cours · auto-générées + manuelles", journal: "Historique des événements · pannes · SSL · serveurs", parametres: "Configuration de l'application" }[activeModule] || ""}
+                {{ servers: "CPU, RAM et disque en temps réel par serveur", capacity: "Projections 6 mois · seuil critique 90% · recommandations", todo: "Tâches en cours · auto-générées + manuelles", workflows: "Création et gestion de procédures d’intervention pas à pas", impacts: "Cartographie des dépendances entre applications et serveurs", journal: "Historique des événements · pannes · SSL · serveurs", parametres: "Configuration de l'application" }[activeModule] || ""}
               </p>
             </div>
             {activeModule === "servers" && <ServerImport />}
           </header>
-          <main style={{ flex: 1, padding: "20px 24px 48px", overflowY: "auto" }}>
-            {activeModule === "servers"  && <ServersView />}
-            {activeModule === "capacity" && <CapacityPlanning />}
-            {activeModule === "todo"     && <TodoList servers={allServers} allUrls={allUrls} />}
+          <main style={{ flex: 1, padding: activeModule === "workflows" || activeModule === "impacts" ? 0 : "20px 24px 48px", overflowY: activeModule === "workflows" || activeModule === "impacts" ? "hidden" : "auto", display: "flex", flexDirection: "column" }}>
+            {activeModule === "servers"   && <ServersView />}
+            {activeModule === "capacity"  && <CapacityPlanning />}
+            {activeModule === "todo"      && <TodoList servers={allServers} allUrls={allUrls} />}
+            {activeModule === "workflows" && <WorkflowEditor />}
+            {activeModule === "impacts"   && <AppImpactMap />}
           </main>
         </div>
       )}
