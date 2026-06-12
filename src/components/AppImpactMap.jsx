@@ -175,8 +175,9 @@ function AppDetailPanel({ app, meta = {}, allDeps, incidentLog, onClose, onSaveM
                   <div key={s.id || s.name} style={{ display: "flex", alignItems: "center", gap: 6, padding: "4px 8px", background: "#0B0F19", borderRadius: 6, border: "1px solid rgba(255,255,255,0.05)" }}>
                     <Server size={9} color="#374151" />
                     <span style={{ fontSize: 10, color: "#9CA3AF", flex: 1, fontFamily: "monospace", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.name}</span>
-                    {s.cpu != null && <span style={{ fontSize: 9, color: healthColor(s.cpu), fontFamily: "monospace" }}>{s.cpu}%</span>}
-                    {s.ram != null && <span style={{ fontSize: 9, color: healthColor(s.ram), fontFamily: "monospace" }}>{s.ram}%</span>}
+                    {s.cpu  != null && <span style={{ fontSize: 9, color: healthColor(s.cpu),  fontFamily: "monospace" }}>CPU {s.cpu}%</span>}
+                    {s.ram  != null && <span style={{ fontSize: 9, color: healthColor(s.ram),  fontFamily: "monospace" }}>RAM {s.ram}%</span>}
+                    {s.disk != null && <span style={{ fontSize: 9, color: healthColor(s.disk), fontFamily: "monospace" }}>Disk {s.disk}%</span>}
                   </div>
                 ))}
               </div>
