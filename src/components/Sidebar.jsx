@@ -317,16 +317,18 @@ export default function Sidebar({ groups, activeGroupId, onSelect, onAddGroup, o
                     }}>
                       {onlineCount}/{urlCount}
                     </span>
-                    {!g.isGlobal && groups.length > 1 && editingId !== g.id && (
+                    {(!g.isGlobal && groups.length > 1 && editingId !== g.id) ? (
                       <button onClick={e => { e.stopPropagation(); onRemoveGroup(g.id); }} style={{
                         background: "none", border: "none", color: "#4B5563", cursor: "pointer",
-                        padding: 1, display: "flex", transition: "color 0.15s",
+                        padding: 1, display: "flex", transition: "color 0.15s", flexShrink: 0,
                       }}
                         onMouseEnter={e => e.currentTarget.style.color = "#F87171"}
                         onMouseLeave={e => e.currentTarget.style.color = "#4B5563"}
                       >
                         <Trash2 size={11} />
                       </button>
+                    ) : (
+                      <span style={{ width: 13, flexShrink: 0 }} />
                     )}
                   </div>
                 </>
