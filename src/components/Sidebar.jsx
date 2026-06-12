@@ -249,7 +249,7 @@ export default function Sidebar({ groups, activeGroupId, onSelect, onAddGroup, o
 
       {open && (
         <div style={{ padding: "10px 10px 4px", fontSize: 10, color: "#4B5563", letterSpacing: "0.08em", textTransform: "uppercase" }}>
-          Groupes
+          Groupes URL's
         </div>
       )}
 
@@ -313,6 +313,7 @@ export default function Sidebar({ groups, activeGroupId, onSelect, onAddGroup, o
                       fontSize: 10, fontFamily: "'JetBrains Mono', monospace",
                       color: onlineCount > 0 ? "#34D399" : "#4B5563",
                       background: "rgba(255,255,255,0.05)", borderRadius: 10, padding: "1px 6px",
+                      minWidth: 42, textAlign: "right", display: "inline-block",
                     }}>
                       {onlineCount}/{urlCount}
                     </span>
