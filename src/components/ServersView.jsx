@@ -310,7 +310,7 @@ function ServerTrend({ server, snapshots }) {
 }
 
 /* ── Panneau de détail ── */
-export function ServerDetail({ server, snapshots, onClose }) {
+export function ServerDetail({ server, snapshots, onClose, width = 360 }) {
   const specs = [
     { Icon: MonitorCog,  label: "OS",      value: server.os },
     { Icon: Network,     label: "IP",      value: server.ip },
@@ -323,7 +323,7 @@ export function ServerDetail({ server, snapshots, onClose }) {
 
   return (
     <div style={{
-      width: 360, flexShrink: 0, background: "rgba(255,255,255,0.025)",
+      width, flexShrink: 0, background: "rgba(255,255,255,0.025)",
       border: "1px solid rgba(255,255,255,0.08)", borderRadius: 14,
       padding: 18, alignSelf: "flex-start", position: "sticky", top: 0,
       maxHeight: "calc(100vh - 80px)", overflowY: "auto",

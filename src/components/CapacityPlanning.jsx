@@ -241,7 +241,7 @@ export default function CapacityPlanning() {
           style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.75)", zIndex: 1000, display: "flex", alignItems: "flex-start", justifyContent: "center", padding: "32px 16px", overflowY: "auto" }}
         >
           <div onClick={e => e.stopPropagation()}>
-            <ServerDetail server={selectedServer} snapshots={snapshots} onClose={() => setSelectedServer(null)} />
+            <ServerDetail server={selectedServer} snapshots={snapshots} onClose={() => setSelectedServer(null)} width="min(90vw, 720px)" />
           </div>
         </div>
       )}
