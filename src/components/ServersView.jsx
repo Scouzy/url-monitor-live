@@ -311,7 +311,7 @@ function ServerTrend({ server, snapshots }) {
 
 /* ── Panneau de détail ── */
 export function ServerDetail({ server, snapshots, onClose, width = 360, overrideStyle = {} }) {
-  const [extraOpen, setExtraOpen] = useState(true);
+  const [extraOpen, setExtraOpen] = useState(false);
   const specs = [
     { Icon: MonitorCog,  label: "OS",      value: server.os },
     { Icon: Network,     label: "IP",      value: server.ip },
