@@ -413,9 +413,15 @@ export default function AppImpactMap() {
                         </div>
                       )}
                       {app.ramAvg != null && (
-                        <div>
+                        <div style={{ marginBottom: 5 }}>
                           <div style={{ fontSize: 9, color: "#374151", marginBottom: 2 }}>RAM</div>
                           <MiniBar value={app.ramAvg} color={ramC} />
+                        </div>
+                      )}
+                      {app.diskAvg != null && (
+                        <div>
+                          <div style={{ fontSize: 9, color: "#374151", marginBottom: 2 }}>Disk</div>
+                          <MiniBar value={app.diskAvg} color={healthColor(app.diskAvg)} />
                         </div>
                       )}
                     </div>
