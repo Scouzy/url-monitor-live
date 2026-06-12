@@ -310,7 +310,7 @@ function ServerTrend({ server, snapshots }) {
 }
 
 /* ── Panneau de détail ── */
-function ServerDetail({ server, snapshots, onClose }) {
+export function ServerDetail({ server, snapshots, onClose }) {
   const specs = [
     { Icon: MonitorCog,  label: "OS",      value: server.os },
     { Icon: Network,     label: "IP",      value: server.ip },

@@ -1,4 +1,4 @@
-import { useState, useSyncExternalStore } from "react";
+import { useState, useMemo, useSyncExternalStore } from "react";
 import {
   Cpu, MemoryStick, HardDrive, TrendingUp, AlertTriangle,
   Layers, Eye, Flame, Trophy, Lightbulb,
@@ -8,6 +8,8 @@ import {
   CartesianGrid, ReferenceLine, Area,
 } from "recharts";
 import { getServers, subscribeServers, fleetTrend, distribution, topConsumers, recommendations, gaugeColor, ROLES } from "../utils/servers";
+import { loadSnapshots } from "../utils/snapshots";
+import { ServerDetail } from "./ServersView";
 
 const METRICS = [
   { id: "cpu",  label: "CPU",    Icon: Cpu,         color: "#818CF8" },
@@ -40,7 +42,9 @@ const cardTitle = (Icon, text, extra) => (
 
 export default function CapacityPlanning() {
   const servers = useSyncExternalStore(subscribeServers, getServers);
+  const snapshots = useMemo(() => loadSnapshots(), [servers]);
   const [metric, setMetric] = useState("cpu");
+  const [selectedServer, setSelectedServer] = useState(null);
   const meta = METRICS.find(m => m.id === metric);
 
   const trend = fleetTrend(servers, metric);
@@ -158,12 +162,17 @@ export default function CapacityPlanning() {
           {cardTitle(Trophy, `Top 5 consommateurs ${meta.label}`)}
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
             {top5.map((s, i) => (
-              <div key={s.id} style={{
-                display: "flex", alignItems: "center", gap: 10, padding: "8px 12px",
-                background: i === 0 ? "rgba(248,113,113,0.05)" : "rgba(255,255,255,0.02)",
-                border: `1px solid ${i === 0 ? "rgba(248,113,113,0.2)" : "rgba(255,255,255,0.05)"}`,
-                borderRadius: 10,
-              }}>
+              <div key={s.id}
+                onClick={() => setSelectedServer(s)}
+                style={{
+                  display: "flex", alignItems: "center", gap: 10, padding: "8px 12px",
+                  background: selectedServer?.id === s.id ? "rgba(99,102,241,0.1)" : i === 0 ? "rgba(248,113,113,0.05)" : "rgba(255,255,255,0.02)",
+                  border: `1px solid ${selectedServer?.id === s.id ? "rgba(99,102,241,0.4)" : i === 0 ? "rgba(248,113,113,0.2)" : "rgba(255,255,255,0.05)"}`,
+                  borderRadius: 10, cursor: "pointer", transition: "background 0.15s, border-color 0.15s",
+                }}
+                onMouseEnter={e => { if (selectedServer?.id !== s.id) e.currentTarget.style.background = "rgba(255,255,255,0.05)"; }}
+                onMouseLeave={e => { if (selectedServer?.id !== s.id) e.currentTarget.style.background = i === 0 ? "rgba(248,113,113,0.05)" : "rgba(255,255,255,0.02)"; }}
+              >
                 <span style={{
                   width: 22, height: 22, borderRadius: 7, flexShrink: 0,
                   display: "flex", alignItems: "center", justifyContent: "center",
@@ -225,6 +234,17 @@ export default function CapacityPlanning() {
           </div>
         )}
       </div>
+      {/* ── Modal détail serveur ── */}
+      {selectedServer && (
+        <div
+          onClick={() => setSelectedServer(null)}
+          style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.75)", zIndex: 1000, display: "flex", alignItems: "flex-start", justifyContent: "center", padding: "32px 16px", overflowY: "auto" }}
+        >
+          <div onClick={e => e.stopPropagation()}>
+            <ServerDetail server={selectedServer} snapshots={snapshots} onClose={() => setSelectedServer(null)} />
+          </div>
+        </div>
+      )}
     </div>
   );
 }
