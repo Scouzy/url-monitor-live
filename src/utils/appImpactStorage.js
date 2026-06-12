@@ -3,8 +3,9 @@ const KEY = "url-monitor-app-impacts";
 export function loadImpacts() {
   try {
     const raw = localStorage.getItem(KEY);
-    return raw ? JSON.parse(raw) : { dependencies: [] };
-  } catch { return { dependencies: [] }; }
+    const data = raw ? JSON.parse(raw) : {};
+    return { dependencies: [], appMeta: {}, ...data };
+  } catch { return { dependencies: [], appMeta: {} }; }
 }
 
 export function saveImpacts(data) {

@@ -1,7 +1,8 @@
 import { useState, useMemo, useSyncExternalStore, useRef, useLayoutEffect, useCallback, useEffect } from "react";
-import { Network, Plus, Trash2, ChevronDown, ChevronRight, Server, ArrowRight } from "lucide-react";
+import { Network, Plus, Trash2, ChevronDown, ChevronRight, Server, ArrowRight, X, FileText, AlertTriangle, Rocket, ExternalLink } from "lucide-react";
 import { getServers, subscribeServers } from "../utils/servers";
 import { loadImpacts, saveImpacts } from "../utils/appImpactStorage";
+import { loadLog } from "./IncidentLog";
 
 const DEP_TYPES = {
   depends_on: { label: "Dépend de",     color: "#F87171" },
@@ -34,6 +35,208 @@ function MiniBar({ value, color }) {
   );
 }
 
+/* ── Panneau de détail Application ── */
+function AppDetailPanel({ app, meta = {}, allDeps, incidentLog, onClose, onSaveMeta }) {
+  const [m, setM] = useState({
+    dat: "", dex: "", dit: "",
+    description: "", resume: "",
+    prochaineMeP: "", derniereMeP: "",
+    ...meta,
+  });
+  const upd = (k, v) => { const next = { ...m, [k]: v }; setM(next); onSaveMeta(next); };
+
+  const cpuC  = healthColor(app.cpuAvg);
+  const ramC  = healthColor(app.ramAvg);
+  const appDeps = allDeps.filter(d => d.from === app.name || d.to === app.name);
+  const serverNames = new Set(app.servers.map(s => s.name));
+  const serverAlerts = incidentLog
+    .filter(e => serverNames.has(e.serverName) || serverNames.has(e.url))
+    .sort((a, b) => b.ts - a.ts)
+    .slice(0, 20);
+
+  const fi = (extra = {}) => ({
+    background: "#0B0F19", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 7,
+    color: "#E5E7EB", fontSize: 11, padding: "6px 9px", outline: "none",
+    width: "100%", boxSizing: "border-box", fontFamily: "inherit", ...extra,
+  });
+
+  const secHead = (color, Icon, label) => (
+    <div style={{ fontSize: 10, fontWeight: 700, color, marginBottom: 12, textTransform: "uppercase", letterSpacing: "0.08em", display: "flex", alignItems: "center", gap: 6 }}>
+      <Icon size={11} />{label}
+    </div>
+  );
+
+  const bloc = (children, extra = {}) => (
+    <div style={{ background: "#151B27", border: "1px solid rgba(255,255,255,0.07)", borderRadius: 12, padding: "16px", ...extra }}>
+      {children}
+    </div>
+  );
+
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.80)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: "16px" }}
+      onClick={onClose}>
+      <div onClick={e => e.stopPropagation()}
+        style={{ background: "#0D1117", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 16, width: "100%", maxWidth: 1020, maxHeight: "92vh", overflowY: "auto", boxShadow: "0 32px 64px rgba(0,0,0,0.9)" }}>
+
+        {/* En-tête sticky */}
+        <div style={{ padding: "18px 24px 14px", borderBottom: "1px solid rgba(255,255,255,0.07)", display: "flex", alignItems: "center", gap: 14, position: "sticky", top: 0, background: "#0D1117", zIndex: 10, borderRadius: "16px 16px 0 0" }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 20, fontWeight: 800, color: "#F9FAFB", marginBottom: 5 }}>{app.name}</div>
+            <div style={{ display: "flex", gap: 14, alignItems: "center", flexWrap: "wrap" }}>
+              <span style={{ fontSize: 10, color: "#4B5563", display: "flex", alignItems: "center", gap: 4 }}>
+                <Server size={10} /> {app.servers.length} serveur{app.servers.length !== 1 ? "s" : ""}
+              </span>
+              {app.cpuAvg  != null && <span style={{ fontSize: 10, color: cpuC,  fontFamily: "monospace", fontWeight: 600 }}>CPU {app.cpuAvg}%</span>}
+              {app.ramAvg  != null && <span style={{ fontSize: 10, color: ramC,  fontFamily: "monospace", fontWeight: 600 }}>RAM {app.ramAvg}%</span>}
+              {app.diskAvg != null && <span style={{ fontSize: 10, color: healthColor(app.diskAvg), fontFamily: "monospace", fontWeight: 600 }}>Disk {app.diskAvg}%</span>}
+              {serverAlerts.length > 0 && <span style={{ fontSize: 10, color: "#F87171", fontWeight: 700 }}>⚠ {serverAlerts.length} alerte{serverAlerts.length > 1 ? "s" : ""}</span>}
+            </div>
+          </div>
+          <button onClick={onClose} style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8, color: "#9CA3AF", cursor: "pointer", padding: "6px 14px", fontSize: 11, display: "flex", alignItems: "center", gap: 6, fontFamily: "inherit" }}>
+            <X size={13} /> Fermer
+          </button>
+        </div>
+
+        <div style={{ padding: "20px 24px 28px" }}>
+
+          {/* ── Ligne 1 : Documentation | Dépendances | Calendrier MeP ── */}
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1.35fr 1fr", gap: 14, marginBottom: 14 }}>
+
+            {/* Documentation */}
+            {bloc(<>
+              {secHead("#818CF8", FileText, "Documentation")}
+              {[["dat", "DAT", "Dossier d'Architecture Technique — URL ou référence"],
+                ["dex", "DEX", "Dossier d'Exploitation — URL ou référence"],
+                ["dit", "DIT", "Dossier d'Installation Technique — URL ou référence"],
+              ].map(([k, label, ph]) => (
+                <div key={k} style={{ marginBottom: 10 }}>
+                  <label style={{ fontSize: 10, color: "#4B5563", display: "block", marginBottom: 3, fontWeight: 700 }}>{label}</label>
+                  <div style={{ display: "flex", gap: 5 }}>
+                    <input value={m[k] || ""} onChange={e => upd(k, e.target.value)} placeholder={ph}
+                      style={{ ...fi({ flex: 1 }) }} />
+                    {m[k] && m[k].startsWith("http") && (
+                      <a href={m[k]} target="_blank" rel="noreferrer"
+                        style={{ display: "flex", alignItems: "center", padding: "0 8px", background: "rgba(129,140,248,0.12)", border: "1px solid rgba(129,140,248,0.25)", borderRadius: 7, color: "#818CF8" }}>
+                        <ExternalLink size={11} />
+                      </a>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </>)}
+
+            {/* Dépendances — encart central */}
+            {bloc(<>
+              {secHead("#34D399", Network, `Dépendances (${appDeps.length})`)}
+              {appDeps.length === 0 ? (
+                <div style={{ fontSize: 11, color: "#374151", textAlign: "center", padding: "28px 0", borderRadius: 8, border: "1px dashed rgba(255,255,255,0.06)" }}>
+                  Aucune dépendance définie<br />
+                  <span style={{ fontSize: 10 }}>Utilisez l'onglet Dépendances pour en ajouter</span>
+                </div>
+              ) : (
+                <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
+                  {appDeps.map(dep => {
+                    const dt = DEP_TYPES[dep.type] || DEP_TYPES.depends_on;
+                    const isSource = dep.from === app.name;
+                    const other    = isSource ? dep.to : dep.from;
+                    return (
+                      <div key={dep.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "9px 12px", borderRadius: 9, background: "#0B0F19", border: `1px solid ${dt.color}28` }}>
+                        <div style={{ width: 7, height: 7, borderRadius: "50%", background: dt.color, flexShrink: 0 }} />
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontSize: 11, color: "#E5E7EB", fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{other}</div>
+                          <div style={{ fontSize: 9, color: dt.color, fontWeight: 700, marginTop: 1 }}>
+                            {isSource ? `→ ${dt.label}` : `← ${dt.label}`}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </>)}
+
+            {/* Calendrier MeP + Serveurs */}
+            {bloc(<>
+              {secHead("#FBBF24", Rocket, "Calendrier MeP")}
+              {[["prochaineMeP", "Prochaine MeP"], ["derniereMeP", "Dernière MeP"]].map(([k, label]) => (
+                <div key={k} style={{ marginBottom: 11 }}>
+                  <label style={{ fontSize: 10, color: "#4B5563", display: "block", marginBottom: 3, fontWeight: 700 }}>{label}</label>
+                  <input type="date" value={m[k] || ""} onChange={e => upd(k, e.target.value)} style={{ ...fi() }} />
+                  {m[k] && (
+                    <div style={{ fontSize: 10, color: k === "prochaineMeP" ? "#FBBF24" : "#34D399", marginTop: 3, fontWeight: 600 }}>
+                      {new Date(m[k]).toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long", year: "numeric" })}
+                    </div>
+                  )}
+                </div>
+              ))}
+              <div style={{ fontSize: 10, color: "#4B5563", fontWeight: 700, marginTop: 14, marginBottom: 7, textTransform: "uppercase", letterSpacing: "0.06em" }}>Serveurs rattachés</div>
+              <div style={{ maxHeight: 110, overflowY: "auto", display: "flex", flexDirection: "column", gap: 3 }}>
+                {app.servers.map(s => (
+                  <div key={s.id || s.name} style={{ display: "flex", alignItems: "center", gap: 6, padding: "4px 8px", background: "#0B0F19", borderRadius: 6, border: "1px solid rgba(255,255,255,0.05)" }}>
+                    <Server size={9} color="#374151" />
+                    <span style={{ fontSize: 10, color: "#9CA3AF", flex: 1, fontFamily: "monospace", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.name}</span>
+                    {s.cpu != null && <span style={{ fontSize: 9, color: healthColor(s.cpu), fontFamily: "monospace" }}>{s.cpu}%</span>}
+                    {s.ram != null && <span style={{ fontSize: 9, color: healthColor(s.ram), fontFamily: "monospace" }}>{s.ram}%</span>}
+                  </div>
+                ))}
+              </div>
+            </>)}
+          </div>
+
+          {/* ── Ligne 2 : Description + Résumé ── */}
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginBottom: 14 }}>
+            {[["description", "📄 Description technique", "Architecture détaillée, composants, flux de données, points d'intégration…"],
+              ["resume",      "📋 Résumé fonctionnel",    "Résumé destiné aux équipes métier et directions, sans jargon technique…"],
+            ].map(([k, label, ph]) => (
+              <div key={k} style={{ background: "#151B27", border: "1px solid rgba(255,255,255,0.07)", borderRadius: 12, padding: "16px" }}>
+                <label style={{ fontSize: 10, fontWeight: 700, color: "#9CA3AF", display: "block", marginBottom: 10, textTransform: "uppercase", letterSpacing: "0.07em" }}>{label}</label>
+                <textarea value={m[k] || ""} onChange={e => upd(k, e.target.value)} rows={5} placeholder={ph}
+                  style={{ ...fi({ resize: "vertical", lineHeight: 1.6 }) }} />
+              </div>
+            ))}
+          </div>
+
+          {/* ── Ligne 3 : Alertes serveurs ── */}
+          <div style={{ background: "#151B27", border: "1px solid rgba(255,255,255,0.07)", borderRadius: 12, padding: "16px" }}>
+            {secHead("#F87171", AlertTriangle, `Dernières alertes serveurs liées à ${app.name} (${serverAlerts.length})`)}
+            {serverAlerts.length === 0 ? (
+              <div style={{ fontSize: 11, color: "#374151", textAlign: "center", padding: "20px 0" }}>
+                ✅ Aucune alerte récente pour les serveurs de cette application
+              </div>
+            ) : (
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(320px, 1fr))", gap: 6 }}>
+                {serverAlerts.map((e, i) => {
+                  const typeMap = {
+                    server_alert:   { color: "#FBBF24", badge: (e.metric || "srv").toUpperCase() },
+                    offline:        { color: "#F87171", badge: "OFFLINE" },
+                    online:         { color: "#34D399", badge: "ONLINE" },
+                    capacity_alert: { color: "#FB923C", badge: "CAPACITY" },
+                    ssl_expiry:     { color: "#818CF8", badge: "SSL" },
+                  };
+                  const t = typeMap[e.type] || { color: "#6B7280", badge: (e.type || "?").toUpperCase() };
+                  return (
+                    <div key={i} style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 11px", borderRadius: 8, background: "#0B0F19", border: `1px solid ${t.color}22` }}>
+                      <span style={{ fontSize: 9, padding: "1px 6px", borderRadius: 4, background: `${t.color}22`, color: t.color, fontWeight: 700, flexShrink: 0 }}>{t.badge}</span>
+                      <span style={{ fontSize: 10, color: "#E5E7EB", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        {e.serverName || e.url}
+                        {e.value != null ? ` — ${e.value}%` : ""}
+                        {e.recoText   ? ` — ${e.recoText}` : ""}
+                      </span>
+                      <span style={{ fontSize: 9, color: "#374151", flexShrink: 0, fontFamily: "monospace", whiteSpace: "nowrap" }}>
+                        {new Date(e.ts).toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit" })} {new Date(e.ts).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 const TABS = ["Carte", "Inventaire", "Dépendances"];
 
 export default function AppImpactMap() {
@@ -42,7 +245,9 @@ export default function AppImpactMap() {
   const [tab, setTab]         = useState("Carte");
   const [expanded, setExpanded] = useState(new Set());
   const [newDep, setNewDep]   = useState({ from: "", to: "", type: "depends_on" });
-  const [selApp, setSelApp]   = useState(null);
+  const [selApp, setSelApp]     = useState(null);
+  const [detailApp, setDetailApp] = useState(null);
+  const [incidentLog]             = useState(() => loadLog());
   const [linePositions, setLinePositions] = useState([]);
   const wrapperRef = useRef(null);
   const cardRefs   = useRef({});
@@ -108,6 +313,8 @@ export default function AppImpactMap() {
   };
 
   const delDep = (id) => persist({ ...impacts, dependencies: impacts.dependencies.filter(d => d.id !== id) });
+
+  const updateAppMeta = (name, meta) => persist({ ...impacts, appMeta: { ...(impacts.appMeta || {}), [name]: meta } });
 
   const selGroup = selApp ? appGroups.find(g => g.name === selApp) : null;
 
@@ -182,7 +389,7 @@ export default function AppImpactMap() {
                     <div
                       key={app.name}
                       ref={el => { cardRefs.current[app.name] = el; }}
-                      onClick={() => setSelApp(isSel ? null : app.name)}
+                      onClick={() => { setSelApp(app.name); setDetailApp(app.name); }}
                       style={{
                         background: isSel ? "rgba(99,102,241,0.12)" : "#151B27",
                         border: `1px solid ${isSel ? "rgba(99,102,241,0.45)" : "rgba(255,255,255,0.08)"}`,
@@ -312,6 +519,22 @@ export default function AppImpactMap() {
           )}
         </div>
       )}
+
+      {/* ── Panneau de détail (modal) ── */}
+      {detailApp && (() => {
+        const dApp = appGroups.find(g => g.name === detailApp);
+        if (!dApp) return null;
+        return (
+          <AppDetailPanel
+            app={dApp}
+            meta={(impacts.appMeta || {})[detailApp] || {}}
+            allDeps={impacts.dependencies}
+            incidentLog={incidentLog}
+            onClose={() => setDetailApp(null)}
+            onSaveMeta={meta => updateAppMeta(detailApp, meta)}
+          />
+        );
+      })()}
     </div>
   );
 }
