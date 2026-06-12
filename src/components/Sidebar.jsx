@@ -186,10 +186,7 @@ export default function Sidebar({ groups, activeGroupId, onSelect, onAddGroup, o
             transition: "width 0.25s ease, height 0.25s ease",
           }} />
           {open && (
-            <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 2 }}>
-              <span style={{ fontSize: 16, fontWeight: 800, color: "#F9FAFB", letterSpacing: "0.04em" }}>G1Oeil</span>
-              <span style={{ fontSize: 9, color: "#6B7280", letterSpacing: "0.08em", textTransform: "uppercase" }}>Live Monitor</span>
-            </div>
+            <span style={{ fontSize: 9, color: "#6B7280", letterSpacing: "0.08em", textTransform: "uppercase" }}>Live Monitor</span>
           )}
         </div>
       </div>
