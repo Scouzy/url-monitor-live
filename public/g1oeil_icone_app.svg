@@ -1,69 +1,62 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
   <defs>
-    <!-- Filtre ombre portée externe -->
-    <filter id="fDropShadow" x="-20%" y="-20%" width="140%" height="140%">
-      <feDropShadow dx="0" dy="8" stdDeviation="14" flood-color="#000000" flood-opacity="0.9"/>
-    </filter>
-
-    <!-- Filtre ombre interne (biseau encart) -->
-    <filter id="fInnerShadow" x="-10%" y="-10%" width="120%" height="120%" color-interpolation-filters="sRGB">
-      <feFlood flood-color="#000000" flood-opacity="0.75" result="flood"/>
-      <feComposite in="flood" in2="SourceGraphic" operator="in" result="shadow"/>
-      <feGaussianBlur in="shadow" stdDeviation="10" result="blurShadow"/>
-      <feOffset dx="0" dy="6" result="offsetShadow"/>
-      <feComposite in="SourceGraphic" in2="offsetShadow" operator="over"/>
-    </filter>
-
-    <!-- Fond : dégradé ultra-sombre -->
-    <linearGradient id="bgDark" x1="0%" y1="0%" x2="10%" y2="100%">
-      <stop offset="0%" stop-color="#3B1270"/>
-      <stop offset="40%" stop-color="#1A0640"/>
-      <stop offset="100%" stop-color="#04010E"/>
+    <!-- Fond noir avec léger dégradé -->
+    <linearGradient id="bgBlack" x1="0%" y1="0%" x2="10%" y2="100%">
+      <stop offset="0%" stop-color="#1C1C1C"/>
+      <stop offset="50%" stop-color="#0A0A0A"/>
+      <stop offset="100%" stop-color="#000000"/>
     </linearGradient>
 
-    <!-- Liseré bord haut (lumière incidente) -->
-    <linearGradient id="borderShine" x1="0%" y1="0%" x2="0%" y2="100%">
-      <stop offset="0%" stop-color="#7C3AED" stop-opacity="0.7"/>
-      <stop offset="100%" stop-color="#000000" stop-opacity="0"/>
+    <!-- Contour extérieur : dégradé gris (lumière en haut, ombre en bas) -->
+    <linearGradient id="borderGrey" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#888888" stop-opacity="0.9"/>
+      <stop offset="50%" stop-color="#444444" stop-opacity="0.6"/>
+      <stop offset="100%" stop-color="#111111" stop-opacity="0.4"/>
     </linearGradient>
 
-    <!-- Ombre portée concentrique sous l'œil -->
-    <radialGradient id="eyeShadow" cx="50%" cy="65%" r="55%">
-      <stop offset="0%" stop-color="#000000" stop-opacity="0.75"/>
-      <stop offset="65%" stop-color="#000000" stop-opacity="0.35"/>
-      <stop offset="100%" stop-color="#000000" stop-opacity="0"/>
-    </radialGradient>
-
-    <!-- Sclère : blanc nacré, creux sur les bords -->
-    <radialGradient id="sclera" cx="50%" cy="38%" r="72%">
-      <stop offset="0%" stop-color="#F8F4FF"/>
-      <stop offset="60%" stop-color="#DDD0F5"/>
-      <stop offset="100%" stop-color="#9B87C0"/>
-    </radialGradient>
-
-    <!-- Iris sphère très contrasté -->
-    <radialGradient id="irisSphere" cx="34%" cy="26%" r="100%">
-      <stop offset="0%" stop-color="#C4B5FD"/>
-      <stop offset="30%" stop-color="#7C3AED"/>
-      <stop offset="65%" stop-color="#2E0D6E"/>
-      <stop offset="100%" stop-color="#0A0220"/>
-    </radialGradient>
-
-    <!-- Reflet glossy iris -->
-    <linearGradient id="glossIris" x1="0%" y1="0%" x2="0%" y2="100%">
-      <stop offset="0%" stop-color="#FFFFFF" stop-opacity="0.9"/>
+    <!-- Biseau intérieur clair (tranche lumineuse) -->
+    <linearGradient id="bevelLight" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#FFFFFF" stop-opacity="0.12"/>
       <stop offset="100%" stop-color="#FFFFFF" stop-opacity="0"/>
     </linearGradient>
 
-    <!-- Lumière réfléchie en bas de l'iris -->
-    <linearGradient id="bounceLight" x1="0%" y1="100%" x2="0%" y2="0%">
-      <stop offset="0%" stop-color="#A855F7" stop-opacity="0.65"/>
-      <stop offset="100%" stop-color="#A855F7" stop-opacity="0"/>
+    <!-- Ombre portée sous l'œil -->
+    <radialGradient id="eyeShadow" cx="50%" cy="68%" r="52%">
+      <stop offset="0%" stop-color="#000000" stop-opacity="0.8"/>
+      <stop offset="60%" stop-color="#000000" stop-opacity="0.3"/>
+      <stop offset="100%" stop-color="#000000" stop-opacity="0"/>
+    </radialGradient>
+
+    <!-- Sclère gris clair nacré -->
+    <radialGradient id="sclera" cx="50%" cy="38%" r="72%">
+      <stop offset="0%" stop-color="#E8E8E8"/>
+      <stop offset="55%" stop-color="#C0C0C0"/>
+      <stop offset="100%" stop-color="#787878"/>
+    </radialGradient>
+
+    <!-- Iris sphère noir/gris contrasté -->
+    <radialGradient id="irisSphere" cx="34%" cy="27%" r="100%">
+      <stop offset="0%" stop-color="#777777"/>
+      <stop offset="28%" stop-color="#2E2E2E"/>
+      <stop offset="62%" stop-color="#111111"/>
+      <stop offset="100%" stop-color="#000000"/>
+    </radialGradient>
+
+    <!-- Reflet glossy haut iris -->
+    <linearGradient id="glossIris" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#FFFFFF" stop-opacity="0.88"/>
+      <stop offset="100%" stop-color="#FFFFFF" stop-opacity="0"/>
     </linearGradient>
 
-    <!-- Vernis glossy supérieur -->
+    <!-- Lumière réfléchie basse iris -->
+    <linearGradient id="bounceLight" x1="0%" y1="100%" x2="0%" y2="0%">
+      <stop offset="0%" stop-color="#AAAAAA" stop-opacity="0.5"/>
+      <stop offset="100%" stop-color="#AAAAAA" stop-opacity="0"/>
+    </linearGradient>
+
+    <!-- Vernis glossy global -->
     <linearGradient id="glossTop" x1="0%" y1="0%" x2="0%" y2="100%">
-      <stop offset="0%" stop-color="#FFFFFF" stop-opacity="0.22"/>
+      <stop offset="0%" stop-color="#FFFFFF" stop-opacity="0.14"/>
       <stop offset="100%" stop-color="#FFFFFF" stop-opacity="0"/>
     </linearGradient>
 
@@ -75,72 +68,72 @@
     </clipPath>
   </defs>
 
-  <!-- Fond arrondi sombre -->
-  <rect x="0" y="0" width="512" height="512" rx="112" fill="url(#bgDark)"/>
+  <!-- Fond noir arrondi -->
+  <rect x="0" y="0" width="512" height="512" rx="112" fill="url(#bgBlack)"/>
 
-  <!-- Biseau : liseré lumineux haut (effet enfoncé) -->
-  <rect x="0" y="0" width="512" height="512" rx="112" fill="none"
-        stroke="url(#borderShine)" stroke-width="3"/>
+  <!-- Contour grisé externe (relief bord) -->
+  <rect x="1.5" y="1.5" width="509" height="509" rx="111" fill="none"
+        stroke="url(#borderGrey)" stroke-width="3"/>
 
-  <!-- Ombre interne haute (effet encart 3D) -->
+  <!-- Biseau lumineux interne haut -->
   <g clip-path="url(#clipIcon)">
-    <path d="M 0 0 H 512 V 80 Q 256 140 0 80 Z" fill="#000000" opacity="0.55"/>
+    <path d="M 0 0 H 512 V 72 Q 256 130 0 72 Z" fill="url(#bevelLight)"/>
   </g>
 
-  <!-- Ombre interne basse (sol) -->
+  <!-- Ombre interne basse -->
   <g clip-path="url(#clipIcon)">
-    <path d="M 0 512 H 512 V 440 Q 256 390 0 440 Z" fill="#000000" opacity="0.45"/>
+    <path d="M 0 512 H 512 V 448 Q 256 400 0 448 Z" fill="#000000" opacity="0.5"/>
   </g>
 
-  <!-- Ombre portée de l'œil -->
-  <ellipse cx="256" cy="292" rx="215" ry="90" fill="url(#eyeShadow)"/>
+  <!-- Ombre portée sous l'œil -->
+  <ellipse cx="256" cy="294" rx="210" ry="88" fill="url(#eyeShadow)"/>
 
-  <!-- Liseré clair sur bord supérieur de l'œil -->
+  <!-- Liseré gris clair bord supérieur de l'œil -->
   <path d="M 76 250 C 140 144, 372 144, 436 250" fill="none"
-        stroke="#D8B4FE" stroke-width="4.5" opacity="0.55" stroke-linecap="round"/>
+        stroke="#AAAAAA" stroke-width="4" opacity="0.45" stroke-linecap="round"/>
 
-  <!-- Sclère -->
+  <!-- Sclère gris nacré -->
   <path d="M 76 256 C 140 150, 372 150, 436 256 C 372 362, 140 362, 76 256 Z"
         fill="url(#sclera)"/>
 
-  <!-- Ombre interne paupière supérieure -->
+  <!-- Ombre paupière supérieure -->
   <g clip-path="url(#clipEye)">
     <path d="M 60 240 C 140 136, 372 136, 452 240 L 452 110 L 60 110 Z"
-          fill="#1A0445" opacity="0.42"/>
+          fill="#000000" opacity="0.38"/>
   </g>
 
-  <!-- Ombre interne paupière inférieure -->
+  <!-- Ombre paupière inférieure -->
   <g clip-path="url(#clipEye)">
     <path d="M 60 272 C 140 376, 372 376, 452 272 L 452 400 L 60 400 Z"
-          fill="#0A0220" opacity="0.32"/>
+          fill="#000000" opacity="0.28"/>
   </g>
 
   <!-- Ombre de contact sous l'iris -->
-  <ellipse cx="256" cy="342" rx="90" ry="20" fill="#000000" opacity="0.55"/>
+  <ellipse cx="256" cy="344" rx="88" ry="19" fill="#000000" opacity="0.6"/>
 
-  <!-- Iris sphère -->
-  <circle cx="256" cy="256" r="88" fill="url(#irisSphere)" filter="url(#fDropShadow)"/>
+  <!-- Iris sphère noir/gris -->
+  <circle cx="256" cy="256" r="88" fill="url(#irisSphere)"/>
 
-  <!-- Anneau sombre périphérique (limbe) -->
-  <circle cx="256" cy="256" r="88" fill="none" stroke="#04010E" stroke-width="9" opacity="0.7"/>
+  <!-- Anneau contour iris (gris foncé) -->
+  <circle cx="256" cy="256" r="88" fill="none" stroke="#333333" stroke-width="5" opacity="0.9"/>
 
   <!-- Lumière réfléchie basse -->
   <path d="M 176 292 A 88 88 0 0 0 336 292 Q 256 328 176 292 Z" fill="url(#bounceLight)"/>
 
   <!-- Pupille : le 1 -->
   <text x="262" y="298" text-anchor="middle" font-family="Poppins, Montserrat, Arial, sans-serif"
-        font-size="118" font-weight="800" fill="#FFFFFF" opacity="0.97">1</text>
+        font-size="118" font-weight="800" fill="#FFFFFF" opacity="0.96">1</text>
 
   <!-- Reflet glossy demi-lune haut -->
-  <path d="M 176 238 A 88 88 0 0 1 336 238 Q 256 204 176 238 Z" fill="url(#glossIris)" opacity="0.55"/>
+  <path d="M 176 238 A 88 88 0 0 1 336 238 Q 256 204 176 238 Z" fill="url(#glossIris)" opacity="0.52"/>
 
   <!-- Points de reflet -->
-  <circle cx="218" cy="208" r="16" fill="#FFFFFF" opacity="0.92"/>
-  <circle cx="244" cy="193" r="7" fill="#FFFFFF" opacity="0.65"/>
+  <circle cx="218" cy="208" r="15" fill="#FFFFFF" opacity="0.90"/>
+  <circle cx="244" cy="193" r="6" fill="#FFFFFF" opacity="0.62"/>
 
-  <!-- Nom -->
+  <!-- Nom gris clair -->
   <text x="256" y="452" text-anchor="middle" font-family="Poppins, Montserrat, Arial, sans-serif"
-        font-size="56" font-weight="800" fill="#D8B4FE" letter-spacing="2" opacity="0.92">G1Oeil</text>
+        font-size="56" font-weight="800" fill="#CCCCCC" letter-spacing="2" opacity="0.90">G1Oeil</text>
 
   <!-- Vernis glossy global -->
   <g clip-path="url(#clipIcon)">
