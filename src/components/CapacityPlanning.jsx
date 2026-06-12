@@ -238,10 +238,11 @@ export default function CapacityPlanning() {
       {selectedServer && (
         <div
           onClick={() => setSelectedServer(null)}
-          style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.75)", zIndex: 1000, display: "flex", alignItems: "flex-start", justifyContent: "center", padding: "32px 16px", overflowY: "auto" }}
+          style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.92)", zIndex: 1000, display: "flex", alignItems: "flex-start", justifyContent: "center", padding: "28px 16px", overflowY: "auto" }}
         >
           <div onClick={e => e.stopPropagation()}>
-            <ServerDetail server={selectedServer} snapshots={snapshots} onClose={() => setSelectedServer(null)} width="min(90vw, 720px)" />
+            <ServerDetail server={selectedServer} snapshots={snapshots} onClose={() => setSelectedServer(null)} width="min(96vw, 960px)"
+              overrideStyle={{ background: "#0D1117", border: "1px solid rgba(255,255,255,0.12)", maxHeight: "none" }} />
           </div>
         </div>
       )}

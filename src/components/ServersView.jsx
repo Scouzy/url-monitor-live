@@ -310,7 +310,8 @@ function ServerTrend({ server, snapshots }) {
 }
 
 /* ── Panneau de détail ── */
-export function ServerDetail({ server, snapshots, onClose, width = 360 }) {
+export function ServerDetail({ server, snapshots, onClose, width = 360, overrideStyle = {} }) {
+  const [extraOpen, setExtraOpen] = useState(true);
   const specs = [
     { Icon: MonitorCog,  label: "OS",      value: server.os },
     { Icon: Network,     label: "IP",      value: server.ip },
@@ -328,6 +329,7 @@ export function ServerDetail({ server, snapshots, onClose, width = 360 }) {
       padding: 18, alignSelf: "flex-start", position: "sticky", top: 0,
       maxHeight: "calc(100vh - 80px)", overflowY: "auto",
       animation: "slideIn 0.25s ease",
+      ...overrideStyle,
     }}>
       {/* En-tête */}
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
@@ -376,23 +378,32 @@ export function ServerDetail({ server, snapshots, onClose, width = 360 }) {
       {/* Colonnes supplémentaires importées (Excel / API) */}
       {server.extra?.length > 0 && (
         <div style={{ marginTop: 18 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 10, color: "#6B7280", marginBottom: 8, textTransform: "uppercase", letterSpacing: "0.06em" }}>
-            <Info size={11} /> Informations complémentaires
+          <div
+            onClick={() => setExtraOpen(o => !o)}
+            style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 5, fontSize: 10, color: "#6B7280", marginBottom: extraOpen ? 8 : 0, textTransform: "uppercase", letterSpacing: "0.06em", cursor: "pointer", padding: "4px 0", borderTop: "1px solid rgba(255,255,255,0.06)", userSelect: "none" }}
+          >
+            <span style={{ display: "flex", alignItems: "center", gap: 5 }}>
+              <Info size={11} /> Informations complémentaires
+              <span style={{ fontSize: 9, color: "#4B5563", fontWeight: 400, textTransform: "none", letterSpacing: 0 }}>({server.extra.length})</span>
+            </span>
+            <ChevronDown size={12} color="#4B5563" style={{ transform: extraOpen ? "rotate(180deg)" : "none", transition: "transform 0.2s" }} />
           </div>
-          <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
-            {server.extra.map(({ label, value }) => (
-              <div key={label} style={{
-                display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10,
-                background: "rgba(99,102,241,0.05)", border: "1px solid rgba(99,102,241,0.15)",
-                borderRadius: 8, padding: "6px 10px",
-              }}>
-                <span style={{ fontSize: 10, color: "#818CF8", fontWeight: 600, flexShrink: 0 }}>{label}</span>
-                <span style={{ fontSize: 11, color: "#E5E7EB", fontFamily: "'JetBrains Mono', monospace", textAlign: "right", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                  {value}
-                </span>
-              </div>
-            ))}
-          </div>
+          {extraOpen && (
+            <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+              {server.extra.map(({ label, value }) => (
+                <div key={label} style={{
+                  display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10,
+                  background: "rgba(99,102,241,0.05)", border: "1px solid rgba(99,102,241,0.15)",
+                  borderRadius: 8, padding: "6px 10px",
+                }}>
+                  <span style={{ fontSize: 10, color: "#818CF8", fontWeight: 600, flexShrink: 0 }}>{label}</span>
+                  <span style={{ fontSize: 11, color: "#E5E7EB", fontFamily: "'JetBrains Mono', monospace", textAlign: "right", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {value}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
     </div>
