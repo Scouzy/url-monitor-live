@@ -156,7 +156,7 @@ export default function Sidebar({ groups, activeGroupId, onSelect, onAddGroup, o
 
   return (
     <aside style={{
-      width: open ? 240 : 56, minWidth: open ? 240 : 56,
+      width: open ? 200 : 48, minWidth: open ? 200 : 48,
       background: "#0D1117", borderRight: "1px solid rgba(255,255,255,0.07)",
       display: "flex", flexDirection: "column", transition: "width 0.25s ease, min-width 0.25s ease",
       overflow: "hidden", height: "100vh", position: "sticky", top: 0, flexShrink: 0,
@@ -183,13 +183,12 @@ export default function Sidebar({ groups, activeGroupId, onSelect, onAddGroup, o
         <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 6, width: "100%" }}>
           <img src="/g1oeil_icone_app.svg" alt="logo" style={{
             width: open ? 52 : 38, height: open ? 52 : 38, borderRadius: 12, objectFit: "contain",
-            filter: "drop-shadow(0 0 10px rgba(139,92,246,0.75))",
             transition: "width 0.25s ease, height 0.25s ease",
           }} />
           {open && (
             <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 2 }}>
               <span style={{ fontSize: 16, fontWeight: 800, color: "#F9FAFB", letterSpacing: "0.04em" }}>G1Oeil</span>
-              <span style={{ fontSize: 9, color: "#6B7280", letterSpacing: "0.08em", textTransform: "uppercase" }}>Monitor Live</span>
+              <span style={{ fontSize: 9, color: "#6B7280", letterSpacing: "0.08em", textTransform: "uppercase" }}>Live Monitor</span>
             </div>
           )}
         </div>
@@ -289,6 +288,7 @@ export default function Sidebar({ groups, activeGroupId, onSelect, onAddGroup, o
                       value={editName}
                       onChange={e => setEditName(e.target.value)}
                       onKeyDown={e => { if (e.key === "Enter") confirmRename(g.id); if (e.key === "Escape") setEditingId(null); }}
+                      onBlur={() => confirmRename(g.id)}
                       onClick={e => e.stopPropagation()}
                       style={{
                         flex: 1, background: "rgba(255,255,255,0.07)", border: "1px solid rgba(99,102,241,0.4)",
