@@ -140,34 +140,37 @@ export default function Sidebar({ groups, activeGroupId, onSelect, onAddGroup, o
       overflow: "hidden", height: "100vh", position: "sticky", top: 0, flexShrink: 0,
     }}>
       <div style={{
-        display: "flex", alignItems: "center", justifyContent: open ? "space-between" : "center",
-        padding: open ? "18px 16px 14px" : "18px 0 14px",
+        display: "flex", flexDirection: "column", alignItems: open ? "flex-end" : "center",
+        padding: "12px 10px 14px",
         borderBottom: "1px solid rgba(255,255,255,0.06)",
+        gap: 12,
       }}>
-        {open && (
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <div style={{
-              width: 28, height: 28, borderRadius: 8, background: "linear-gradient(135deg,#6366F1,#8B5CF6)",
-              display: "flex", alignItems: "center", justifyContent: "center",
-            }}>
-              <Activity size={14} color="#fff" />
-            </div>
-            <span style={{ fontSize: 13, fontWeight: 700, color: "#F9FAFB", letterSpacing: "-0.01em" }}>
-              URL Monitor
-            </span>
-          </div>
-        )}
+        {/* Bouton rétractation */}
         <button onClick={onToggle} style={{
           background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.08)",
           borderRadius: 8, width: 28, height: 28, display: "flex", alignItems: "center",
           justifyContent: "center", cursor: "pointer", color: "#9CA3AF", flexShrink: 0,
-          transition: "color 0.2s",
+          transition: "color 0.2s", alignSelf: "flex-end",
         }}
           onMouseEnter={e => e.currentTarget.style.color = "#F3F4F6"}
           onMouseLeave={e => e.currentTarget.style.color = "#9CA3AF"}
         >
           {open ? <ChevronLeft size={14} /> : <ChevronRight size={14} />}
         </button>
+        {/* Logo centré */}
+        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 6, width: "100%" }}>
+          <img src="/g1oeil_icone_app.svg" alt="logo" style={{
+            width: open ? 52 : 38, height: open ? 52 : 38, borderRadius: 12, objectFit: "contain",
+            filter: "drop-shadow(0 0 10px rgba(139,92,246,0.75))",
+            transition: "width 0.25s ease, height 0.25s ease",
+          }} />
+          {open && (
+            <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 2 }}>
+              <span style={{ fontSize: 16, fontWeight: 800, color: "#F9FAFB", letterSpacing: "0.04em" }}>G1Oeil</span>
+              <span style={{ fontSize: 9, color: "#6B7280", letterSpacing: "0.08em", textTransform: "uppercase" }}>Monitor Live</span>
+            </div>
+          )}
+        </div>
       </div>
 
       {/* ── Modules ── */}

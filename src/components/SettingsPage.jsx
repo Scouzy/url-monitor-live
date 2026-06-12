@@ -331,7 +331,7 @@ export default function SettingsPage({
         <SectionHead icon={<Info size={14} />} label="À propos" />
         <div style={{ padding: "16px 18px", display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 16 }}>
           <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-            <div style={{ fontSize: 15, fontWeight: 700, color: "#F9FAFB" }}>URL Monitor Live <span style={{ fontSize: 11, color: "#818CF8", fontWeight: 600, padding: "1px 7px", borderRadius: 6, background: "rgba(129,140,248,0.12)", border: "1px solid rgba(129,140,248,0.25)" }}>v2.0</span></div>
+            <div style={{ fontSize: 15, fontWeight: 700, color: "#F9FAFB" }}>G1Oeil <span style={{ fontSize: 11, color: "#818CF8", fontWeight: 600, padding: "1px 7px", borderRadius: 6, background: "rgba(129,140,248,0.12)", border: "1px solid rgba(129,140,248,0.25)" }}>v2.0</span></div>
             <div style={{ fontSize: 11, color: "#4B5563" }}>Application de surveillance d'URLs, serveurs et capacity planning</div>
             <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginTop: 4 }}>
               {[["React 18", "#61DAFB"], ["Vite 5", "#646CFF"], ["Recharts", "#22D3EE"], ["SheetJS", "#34D399"], ["Lucide", "#F472B6"]].map(([t, c]) => (
