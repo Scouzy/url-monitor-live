@@ -8,6 +8,10 @@ import { getStatus, STATUS } from "../constants";
 import { importGroupsJson, importGroupsArray } from "../utils/storage";
 import { getServersBackup, restoreServersBackup } from "../utils/servers";
 import { loadTodos, saveTodos } from "../utils/todoStorage";
+import { loadSnapshots } from "../utils/snapshots";
+import { loadCapacitySettings, saveCapacitySettings } from "../utils/capacitySettings";
+import { loadImpacts, saveImpacts } from "../utils/appImpactStorage";
+import { loadLog, saveLog } from "./IncidentLog";
 
 function ExportImportButtons({ groups, onImport }) {
   const fileRef = useRef(null);
@@ -15,16 +19,20 @@ function ExportImportButtons({ groups, onImport }) {
 
   const handleExport = () => {
     const backup = {
-      version: 2,
+      version: 3,
       exportedAt: new Date().toISOString(),
       groups,
-      servers: getServersBackup(),
-      todos: loadTodos(),
+      servers:          getServersBackup(),
+      todos:            loadTodos(),
+      snapshots:        loadSnapshots(),
+      capacitySettings: loadCapacitySettings(),
+      appImpacts:       loadImpacts(),
+      incidents:        loadLog(),
     };
     const blob = new Blob([JSON.stringify(backup, null, 2)], { type: "application/json" });
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
-    a.download = `url-monitor-backup-${new Date().toISOString().slice(0, 10)}.json`;
+    a.download = `g1oeil-backup-${new Date().toISOString().slice(0, 10)}.json`;
     a.click();
     URL.revokeObjectURL(a.href);
   };
@@ -38,28 +46,42 @@ function ExportImportButtons({ groups, onImport }) {
         const parsed = JSON.parse(ev.target.result);
         let importedGroups, importedServers = null, importedTodos = null;
 
+        let importedSnapshots = null, importedCapSettings = null, importedImpacts = null, importedIncidents = null;
+
         if (Array.isArray(parsed)) {
           /* Ancien format (v1) — tableau de groupes uniquement */
           importedGroups = importGroupsJson(ev.target.result);
-        } else if (parsed.version === 2 && parsed.groups) {
-          /* Nouveau format (v2) — sauvegarde complète */
-          importedGroups  = importGroupsArray(parsed.groups);
-          importedServers = (parsed.servers?.rows) ? parsed.servers : null;
-          importedTodos   = Array.isArray(parsed.todos) ? parsed.todos : null;
+        } else if ((parsed.version === 2 || parsed.version === 3) && parsed.groups) {
+          /* Format v2/v3 — sauvegarde complète */
+          importedGroups      = importGroupsArray(parsed.groups);
+          importedServers     = parsed.servers?.rows ? parsed.servers : null;
+          importedTodos       = Array.isArray(parsed.todos)     ? parsed.todos     : null;
+          importedSnapshots   = Array.isArray(parsed.snapshots) ? parsed.snapshots : null;
+          importedCapSettings = parsed.capacitySettings         || null;
+          importedImpacts     = parsed.appImpacts               || null;
+          importedIncidents   = Array.isArray(parsed.incidents) ? parsed.incidents : null;
         } else {
           throw new Error("Format invalide");
         }
 
         onImport(importedGroups);
-        if (importedServers) restoreServersBackup(importedServers);
-        if (importedTodos)   saveTodos(importedTodos);
+        if (importedServers)     restoreServersBackup(importedServers);
+        if (importedTodos)       saveTodos(importedTodos);
+        if (importedSnapshots)   { try { localStorage.setItem("capacity-snapshots", JSON.stringify(importedSnapshots)); } catch {} }
+        if (importedCapSettings) saveCapacitySettings(importedCapSettings);
+        if (importedImpacts)     saveImpacts(importedImpacts);
+        if (importedIncidents)   saveLog(importedIncidents);
 
         const urlCount    = importedGroups.reduce((s, g) => s + (g.urls?.length || 0), 0);
-        const serverCount = importedServers?.rows?.length || 0;
-        const todoCount   = importedTodos?.length   || 0;
+        const serverCount = importedServers?.rows?.length   || 0;
+        const todoCount   = importedTodos?.length           || 0;
+        const snapCount   = importedSnapshots?.length       || 0;
+        const incCount    = importedIncidents?.length       || 0;
         const parts = [`${urlCount} URL${urlCount > 1 ? "s" : ""}`];
         if (serverCount) parts.push(`${serverCount} serveur${serverCount > 1 ? "s" : ""}`);
         if (todoCount)   parts.push(`${todoCount} tâche${todoCount > 1 ? "s" : ""}`);
+        if (snapCount)   parts.push(`${snapCount} snapshot${snapCount > 1 ? "s" : ""}`);
+        if (incCount)    parts.push(`${incCount} incident${incCount > 1 ? "s" : ""}`);
         setMsg({ ok: true, text: parts.join(" · ") + " restaurés" });
       } catch {
         setMsg({ ok: false, text: "Fichier invalide" });
