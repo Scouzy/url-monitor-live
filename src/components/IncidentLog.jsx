@@ -80,6 +80,22 @@ function IncidentList({ log, onClear }) {
   const [filter, setFilter] = useState("all");
   const [hovered, setHovered] = useState(null);
   const filtered = log.filter(e => filter === "all" || e.type === filter).slice().reverse();
+
+  const grouped = [];
+  const groupMap = new Map();
+  filtered.forEach(e => {
+    const key = `${e.url}||${e.type}`;
+    if (!groupMap.has(key)) {
+      const entry = { ...e, count: 1, oldestTs: e.ts };
+      groupMap.set(key, entry);
+      grouped.push(entry);
+    } else {
+      const ex = groupMap.get(key);
+      ex.count++;
+      if (e.ts < ex.oldestTs) ex.oldestTs = e.ts;
+    }
+  });
+
   const counts = { all: log.length, offline: 0, online: 0, ssl_expiry: 0, server_alert: 0, capacity_alert: 0 };
   log.forEach(e => { if (counts[e.type] !== undefined) counts[e.type]++; });
 
@@ -117,7 +133,7 @@ function IncidentList({ log, onClear }) {
             <div style={{ fontSize: 13, fontWeight: 600, color: "#4B5563", marginBottom: 4 }}>Aucun événement</div>
             <div style={{ fontSize: 11, color: "#374151" }}>Le journal est vide pour ce filtre.</div>
           </div>
-        ) : filtered.map(e => {
+        ) : grouped.map(e => {
           const meta = TYPE_META[e.type] || TYPE_META.offline;
           const isHov = hovered === e.id;
           return (
@@ -144,6 +160,13 @@ function IncidentList({ log, onClear }) {
                     overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                     {getDomain(e.url)}
                   </span>
+                  {e.count > 1 && (
+                    <span style={{ fontSize: 11, fontWeight: 800, color: meta.color,
+                      background: meta.bg, border: `1px solid ${meta.border}`,
+                      borderRadius: 8, padding: "1px 8px", flexShrink: 0 }}>
+                      ×{e.count}
+                    </span>
+                  )}
                   {e.groupName && (
                     <span style={{ fontSize: 9, padding: "2px 7px", borderRadius: 10,
                       background: "rgba(99,102,241,0.15)", color: "#818CF8", flexShrink: 0,
@@ -155,6 +178,7 @@ function IncidentList({ log, onClear }) {
                 <div style={{ fontSize: 10, color: "#6B7280", display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                   <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
                     <Clock size={9} /> {formatTs(e.ts)}
+                    {e.count > 1 && <span style={{ color: "#4B5563" }}> · 1ère : {formatTs(e.oldestTs)}</span>}
                   </span>
                   {e.duration && <span style={{ color: "#34D399" }}>→ rétabli après <strong>{formatDur(e.duration)}</strong></span>}
                   {e.type === "server_alert" && e.metric != null && (

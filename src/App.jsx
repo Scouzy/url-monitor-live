@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback, useSyncExternalStore } from "react";
+﻿import { useState, useEffect, useRef, useCallback, useSyncExternalStore } from "react";
 import { Globe, Plus, RefreshCw, Pause, Play, Wifi, WifiOff, Zap, LayoutGrid, List, Search, X, Activity, AlertTriangle, Settings, Bell, BellOff, Lock, CheckCircle, Server } from "lucide-react";
 import { STATUS, DEFAULT_INTERVAL, MAX_HISTORY, getStatus } from "./constants";
 import { checkUrl } from "./utils/checkUrl";
@@ -17,6 +17,7 @@ import TodoList from "./components/TodoList";
 import WorkflowEditor from "./components/WorkflowEditor";
 import AppImpactMap from "./components/AppImpactMap";
 import SettingsPage from "./components/SettingsPage";
+import DashboardPage from "./components/DashboardPage";
 import { subscribeServers, getServers, recommendations as getRecos } from "./utils/servers";
 import { loadCapacitySettings, saveCapacitySettings } from "./utils/capacitySettings";
 import { loadTodos } from "./utils/todoStorage";
@@ -422,15 +423,16 @@ export default function App() {
           }}>
             <div>
               <h1 style={{ fontSize: 16, fontWeight: 700, color: "#F9FAFB", margin: 0 }}>
-                {{ servers: "Inventaire serveurs", capacity: "Capacity Planning", todo: "TodoList", workflows: "Workflows", impacts: "Impacts Applicatifs", journal: "Journal des alertes", parametres: "Paramètres" }[activeModule] || activeModule}
+                {{ dashboard: "Dashboard", servers: "Inventaire serveurs", capacity: "Capacity Planning", todo: "TodoList", workflows: "Workflows", impacts: "Impacts Applicatifs", journal: "Journal des alertes", parametres: "Paramètres" }[activeModule] || activeModule}
               </h1>
               <p style={{ fontSize: 11, color: "#4B5563", margin: 0 }}>
-                {{ servers: "CPU, RAM et disque en temps réel par serveur", capacity: "Projections 6 mois · seuil critique 90% · recommandations", todo: "Tâches en cours · auto-générées + manuelles", workflows: "Création et gestion de procédures d’intervention pas à pas", impacts: "Cartographie des dépendances entre applications et serveurs", journal: "Historique des événements · pannes · SSL · serveurs", parametres: "Configuration de l'application" }[activeModule] || ""}
+                {{ dashboard: "Vue synthetique - KPIs - alertes - SSL - performance", servers: "CPU, RAM et disque en temps réel par serveur", capacity: "Projections 6 mois · seuil critique 90% · recommandations", todo: "Tâches en cours · auto-générées + manuelles", workflows: "Création et gestion de procédures d’intervention pas à pas", impacts: "Cartographie des dépendances entre applications et serveurs", journal: "Historique des événements · pannes · SSL · serveurs", parametres: "Configuration de l'application" }[activeModule] || ""}
               </p>
             </div>
             {activeModule === "servers" && <ServerImport />}
           </header>
           <main style={{ flex: 1, padding: activeModule === "workflows" || activeModule === "impacts" ? 0 : "20px 24px 48px", overflowY: activeModule === "workflows" || activeModule === "impacts" ? "hidden" : "auto", display: "flex", flexDirection: "column" }}>
+            {activeModule === "dashboard" && <DashboardPage groups={groups} allUrls={allUrls} allServers={allServers} incidentLog={incidentLog} capacitySettings={capacitySettings} />}
             {activeModule === "servers"   && <ServersView />}
             {activeModule === "capacity"  && <CapacityPlanning />}
             {activeModule === "todo"      && <TodoList servers={allServers} allUrls={allUrls} />}

@@ -2,7 +2,7 @@ import { useState, useRef } from "react";
 import {
   ChevronLeft, ChevronRight, Plus, Folder, FolderOpen,
   Trash2, Activity, Check, X, Globe, Download, Upload,
-  Server, BarChart3, MonitorCheck, AlertTriangle, Settings, ClipboardList, GitBranch, Network,
+  Server, BarChart3, MonitorCheck, AlertTriangle, Settings, ClipboardList, GitBranch, Network, LayoutDashboard,
 } from "lucide-react";
 import { getStatus, STATUS } from "../constants";
 import { importGroupsJson, importGroupsArray } from "../utils/storage";
@@ -120,6 +120,7 @@ function ExportImportButtons({ groups, onImport }) {
 }
 
 const MODULES = [
+  { id: "dashboard",  label: "Dashboard",         Icon: LayoutDashboard },
   { id: "monitor",    label: "Surveillance",      Icon: MonitorCheck },
   { id: "servers",    label: "Serveurs",          Icon: Server },
   { id: "capacity",   label: "Capacity Planning", Icon: BarChart3 },
