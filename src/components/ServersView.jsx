@@ -439,8 +439,8 @@ export default function ServersView() {
   const selected = servers.find(s => s.id === selectedId);
 
   return (
-    <div style={{ display: "flex", gap: 16, alignItems: "flex-start" }}>
-      <div style={{ flex: 1, minWidth: 0 }}>
+    <div>
+      <div>
         {/* Filtres */}
         <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap", alignItems: "center" }}>
           <div style={{
@@ -538,8 +538,19 @@ export default function ServersView() {
         )}
       </div>
 
-      {/* Panneau détail */}
-      {selected && <ServerDetail server={selected} snapshots={snapshots} onClose={() => setSelectedId(null)} />}
+      {/* Modale détail serveur */}
+      {selected && (
+        <div
+          onClick={() => setSelectedId(null)}
+          style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.92)", zIndex: 1000, display: "flex", alignItems: "flex-start", justifyContent: "center", padding: "28px 16px", overflowY: "auto" }}
+        >
+          <div onClick={e => e.stopPropagation()}>
+            <ServerDetail server={selected} snapshots={snapshots} onClose={() => setSelectedId(null)}
+              width="min(96vw, 960px)"
+              overrideStyle={{ background: "#0D1117", border: "1px solid rgba(255,255,255,0.12)", maxHeight: "none" }} />
+          </div>
+        </div>
+      )}
     </div>
   );
 }
