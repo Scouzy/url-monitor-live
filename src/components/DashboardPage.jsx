@@ -1,4 +1,4 @@
-import { Globe, Wifi, WifiOff, Zap, Server, AlertTriangle, CheckCircle, KeyRound, Clock, Shield, Activity, Layers } from "lucide-react";
+import { Globe, Wifi, WifiOff, Zap, Server, AlertTriangle, CheckCircle, KeyRound, Clock, Shield, Activity, Layers, AppWindow } from "lucide-react";
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid } from "recharts";
 import { getStatus, STATUS } from "../constants";
 
@@ -347,7 +347,18 @@ export default function DashboardPage({ groups = [], allUrls = [], allServers = 
                       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
                         <div style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}>
                           <span style={{ fontSize: 10, fontWeight: 700, color: "#374151", width: 16, flexShrink: 0 }}>#{i + 1}</span>
-                          <span style={{ fontSize: 11, color: "#D1D5DB", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.name}</span>
+                          <span style={{ fontSize: 11, color: "#D1D5DB", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", width: 115, flexShrink: 0 }}>{s.name}</span>
+                          {s.app && (
+                            <span style={{
+                              display: "inline-flex", alignItems: "center", gap: 3, fontSize: 9, fontWeight: 600,
+                              padding: "1px 6px", borderRadius: 10, flexShrink: 0,
+                              background: "rgba(167,139,250,0.12)", color: "#A78BFA",
+                              border: "1px solid rgba(167,139,250,0.3)",
+                              maxWidth: 90, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                            }}>
+                              <AppWindow size={8} style={{ flexShrink: 0 }} />{s.app}
+                            </span>
+                          )}
                         </div>
                         <span style={{ fontSize: 12, fontWeight: 800, color: barColor, fontFamily: "'JetBrains Mono', monospace", flexShrink: 0, marginLeft: 8 }}>{val}%</span>
                       </div>

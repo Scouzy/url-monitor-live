@@ -40,12 +40,15 @@ export default function App() {
   const [checkingIds, setCheckingIds] = useState(new Set());
   const [toasts, setToasts] = useState([]);
   const [incidentLog, setIncidentLog] = useState(() => loadLog());
-  const [mainTab, setMainTab] = useState("surveillance"); // surveillance | journal | parametres
-  const [activeModule, setActiveModule] = useState("monitor"); // monitor | servers | capacity
+  const [mainTab, setMainTab] = useState(() => localStorage.getItem("g1oeil_tab") || "surveillance");
+  const [activeModule, setActiveModule] = useState(() => localStorage.getItem("g1oeil_module") || "dashboard");
   const [notifEnabled, setNotifEnabled] = useState(() => typeof Notification !== "undefined" && Notification.permission === "granted");
   const [capacitySettings, setCapacitySettings] = useState(() => loadCapacitySettings());
   const allServers = useSyncExternalStore(subscribeServers, getServers);
   const [todoBadge, setTodoBadge] = useState(() => loadTodos().filter(t => t.status !== "done").length);
+
+  useEffect(() => { localStorage.setItem("g1oeil_module", activeModule); }, [activeModule]);
+  useEffect(() => { localStorage.setItem("g1oeil_tab", mainTab); }, [mainTab]);
 
   useEffect(() => {
     const handler = (e) => setTodoBadge((e.detail || []).filter(t => t.status !== "done").length);
