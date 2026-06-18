@@ -154,6 +154,11 @@ export default function DashboardPage({ groups = [], allUrls = [], allServers = 
   incidentLog.filter(e => e.type === "offline").forEach(e => { incidentsByUrl[e.url] = (incidentsByUrl[e.url] || 0) + 1; });
   const topIncidents = Object.entries(incidentsByUrl).sort((a, b) => b[1] - a[1]).slice(0, 5);
 
+  /* Top 5 par métrique */
+  const top5Cpu  = [...allServers].sort((a, b) => (b.cpu  ?? 0) - (a.cpu  ?? 0)).slice(0, 5);
+  const top5Ram  = [...allServers].sort((a, b) => (b.ram  ?? 0) - (a.ram  ?? 0)).slice(0, 5);
+  const top5Disk = [...allServers].sort((a, b) => (b.disk ?? 0) - (a.disk ?? 0)).slice(0, 5);
+
   /* Distribution Disque par tranche */
   const CPU_TRANCHES = [
     { label: "0–25%",   min: 0,  max: 25,  color: "#6366F1" },
@@ -252,9 +257,9 @@ export default function DashboardPage({ groups = [], allUrls = [], allServers = 
           ) : (
             <Panel>
               {[
-                { label: "CPU moyen",    value: avgCpu,  threshold: cpuThreshold,  color: "#F87171", ok: "#6366F1" },
-                { label: "RAM moyenne",  value: avgRam,  threshold: ramThreshold,  color: "#F87171", ok: "#818CF8" },
-                { label: "Disque moyen", value: avgDisk, threshold: diskThreshold, color: "#F87171", ok: "#34D399" },
+                { label: "CPU moyen",    value: avgCpu,  threshold: cpuThreshold,  color: "#F87171", ok: "#818CF8" },
+                { label: "RAM moyenne",  value: avgRam,  threshold: ramThreshold,  color: "#F87171", ok: "#EC4899" },
+                { label: "Disque moyen", value: avgDisk, threshold: diskThreshold, color: "#F87171", ok: "#FBBF24" },
               ].map(({ label, value, threshold, color, ok }, i) => {
                 const bar_color = value >= threshold ? color : ok;
                 return (
@@ -316,6 +321,47 @@ export default function DashboardPage({ groups = [], allUrls = [], allServers = 
           </Panel>
         </div>
       </div>
+
+      {/* ══ TOP 5 CONSOMMATEURS ════════════════════════════════ */}
+      {totalServers > 0 && (
+        <div>
+          <SectionTitle>Top 5 — Consommateurs de ressources</SectionTitle>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 16 }}>
+            {[
+              { label: "CPU",    data: top5Cpu,  key: "cpu",  color: "#818CF8" },
+              { label: "RAM",    data: top5Ram,  key: "ram",  color: "#EC4899" },
+              { label: "Disque", data: top5Disk, key: "disk", color: "#FBBF24" },
+            ].map(({ label, data, key, color }) => (
+              <Panel key={key}>
+                <div style={{ padding: "9px 14px", borderBottom: "1px solid rgba(255,255,255,0.06)", display: "flex", alignItems: "center", gap: 7 }}>
+                  <div style={{ width: 7, height: 7, borderRadius: "50%", background: color, boxShadow: `0 0 6px ${color}` }} />
+                  <span style={{ fontSize: 11, fontWeight: 700, color, textTransform: "uppercase", letterSpacing: "0.08em" }}>{label}</span>
+                </div>
+                {data.length === 0 ? (
+                  <EmptyPanel icon={Server} text="Aucune donnée" />
+                ) : data.map((s, i) => {
+                  const val = s[key] ?? 0;
+                  const barColor = val >= 90 ? "#F87171" : val >= 75 ? "#FB923C" : val >= 50 ? "#FBBF24" : color;
+                  return (
+                    <div key={s.id} style={{ padding: "7px 14px", borderBottom: i < data.length - 1 ? "1px solid rgba(255,255,255,0.04)" : "none" }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}>
+                          <span style={{ fontSize: 10, fontWeight: 700, color: "#374151", width: 16, flexShrink: 0 }}>#{i + 1}</span>
+                          <span style={{ fontSize: 11, color: "#D1D5DB", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.name}</span>
+                        </div>
+                        <span style={{ fontSize: 12, fontWeight: 800, color: barColor, fontFamily: "'JetBrains Mono', monospace", flexShrink: 0, marginLeft: 8 }}>{val}%</span>
+                      </div>
+                      <div style={{ height: 4, background: "rgba(255,255,255,0.05)", borderRadius: 2, overflow: "hidden" }}>
+                        <div style={{ width: `${val}%`, height: "100%", background: `linear-gradient(90deg, ${barColor}99, ${barColor})`, borderRadius: 2, transition: "width 0.4s ease" }} />
+                      </div>
+                    </div>
+                  );
+                })}
+              </Panel>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* ══ DISTRIBUTION CPU ════════════════════════════════════ */}
       {totalServers > 0 && (

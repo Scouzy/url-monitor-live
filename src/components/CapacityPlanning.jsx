@@ -13,7 +13,7 @@ import { ServerDetail } from "./ServersView";
 
 const METRICS = [
   { id: "cpu",  label: "CPU",    Icon: Cpu,         color: "#818CF8" },
-  { id: "ram",  label: "RAM",    Icon: MemoryStick, color: "#F472B6" },
+  { id: "ram",  label: "RAM",    Icon: MemoryStick, color: "#EC4899" },
   { id: "disk", label: "Disque", Icon: HardDrive,   color: "#FBBF24" },
 ];
 
@@ -133,24 +133,27 @@ export default function CapacityPlanning() {
         <div style={card}>
           {cardTitle(Layers, `Distribution ${meta.label} par tranche`)}
           <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-            {dist.map(b => (
-              <div key={b.label} style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                <span style={{ width: 56, fontSize: 11, color: "#9CA3AF", fontFamily: "'JetBrains Mono', monospace", flexShrink: 0 }}>
-                  {b.label}
-                </span>
-                <div style={{ flex: 1, height: 18, background: "rgba(255,255,255,0.04)", borderRadius: 6, overflow: "hidden" }}>
-                  <div style={{
-                    width: `${(b.count / maxDist) * 100}%`, height: "100%",
-                    background: `linear-gradient(90deg, ${b.color}99, ${b.color})`,
-                    borderRadius: 6, transition: "width 0.7s cubic-bezier(0.4,0,0.2,1)",
-                    minWidth: b.count > 0 ? 18 : 0,
-                  }} />
+            {dist.map(b => {
+              const barColor = b.min >= 90 ? "#F87171" : b.min >= 75 ? "#FB923C" : b.min >= 50 ? "#FBBF24" : meta.color;
+              return (
+                <div key={b.label} style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                  <span style={{ width: 56, fontSize: 11, color: "#9CA3AF", fontFamily: "'JetBrains Mono', monospace", flexShrink: 0 }}>
+                    {b.label}
+                  </span>
+                  <div style={{ flex: 1, height: 18, background: "rgba(255,255,255,0.04)", borderRadius: 6, overflow: "hidden" }}>
+                    <div style={{
+                      width: `${(b.count / maxDist) * 100}%`, height: "100%",
+                      background: `linear-gradient(90deg, ${barColor}99, ${barColor})`,
+                      borderRadius: 6, transition: "width 0.7s cubic-bezier(0.4,0,0.2,1)",
+                      minWidth: b.count > 0 ? 18 : 0,
+                    }} />
+                  </div>
+                  <span style={{ width: 22, fontSize: 12, fontWeight: 700, color: b.count > 0 ? barColor : "#374151", fontFamily: "'JetBrains Mono', monospace", textAlign: "right", flexShrink: 0 }}>
+                    {b.count}
+                  </span>
                 </div>
-                <span style={{ width: 22, fontSize: 12, fontWeight: 700, color: b.count > 0 ? b.color : "#374151", fontFamily: "'JetBrains Mono', monospace", textAlign: "right", flexShrink: 0 }}>
-                  {b.count}
-                </span>
-              </div>
-            ))}
+              );
+            })}
           </div>
           <div style={{ marginTop: 12, fontSize: 10, color: "#4B5563", textAlign: "center" }}>
             {servers.length} serveurs au total
