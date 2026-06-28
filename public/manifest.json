@@ -1,0 +1,23 @@
+{
+  "name": "G1Oeil - Live Monitor",
+  "short_name": "G1Oeil",
+  "description": "Surveillance en temps réel de l'accessibilité des URL",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0B0F19",
+  "theme_color": "#0B0F19",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "/g1oeil_icone_app.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/g1oeil_icone_app.svg",
+      "sizes": "any",
+      "type": "image/svg+xml"
+    }
+  ]
+}
