@@ -124,10 +124,10 @@ const MODULES = [
   { id: "monitor",    label: "Surveillance",      Icon: MonitorCheck },
   { id: "servers",    label: "Serveurs",          Icon: Server },
   { id: "capacity",   label: "Capacity Planning", Icon: BarChart3 },
-  { id: "todo",       label: "TodoList",          Icon: ClipboardList },
-  { id: "workflows",  label: "Workflows",         Icon: GitBranch },
   { id: "impacts",    label: "Impacts App.",      Icon: Network },
   { id: "journal",    label: "Journal",           Icon: AlertTriangle },
+  { id: "workflows",  label: "Workflows",         Icon: GitBranch },
+  { id: "todo",       label: "TodoList",          Icon: ClipboardList },
   { id: "parametres", label: "Paramètres",        Icon: Settings },
 ];
 
