@@ -1,7 +1,7 @@
 import { useState, useMemo, useSyncExternalStore } from "react";
 import {
   Cpu, MemoryStick, HardDrive, TrendingUp, AlertTriangle,
-  Layers, Eye, Flame, Trophy, Lightbulb,
+  Layers, Eye, Flame, Trophy, Lightbulb, AppWindow,
 } from "lucide-react";
 import {
   ResponsiveContainer, ComposedChart, Line, XAxis, YAxis, Tooltip,
@@ -164,7 +164,17 @@ export default function CapacityPlanning() {
                         color: i === 0 ? "#F87171" : "#6B7280" }}>{i + 1}</span>
                       <div style={{ flex: 1, minWidth: 0 }}>
                         <div style={{ fontSize: 11, fontWeight: 600, color: "#E5E7EB", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.name}</div>
-                        {s.app && <div style={{ fontSize: 9, color: "#A78BFA" }}>{s.app}</div>}
+                        {s.app && (
+                          <span style={{
+                            display: "inline-flex", alignItems: "center", gap: 3, fontSize: 9, fontWeight: 600,
+                            padding: "1px 5px", borderRadius: 8,
+                            background: "rgba(167,139,250,0.12)", color: "#A78BFA",
+                            border: "1px solid rgba(167,139,250,0.3)",
+                            maxWidth: 80, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                          }}>
+                            <AppWindow size={7} style={{ flexShrink: 0 }} />{s.app}
+                          </span>
+                        )}
                       </div>
                       <span style={{ fontSize: 12, fontWeight: 700, color: gaugeColor(s[m.id]), fontFamily: "'JetBrains Mono', monospace", flexShrink: 0 }}>{s[m.id]}%</span>
                     </div>
@@ -292,7 +302,20 @@ export default function CapacityPlanning() {
                   <div style={{ fontSize: 12, fontWeight: 600, color: "#E5E7EB", fontFamily: "'JetBrains Mono', monospace", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                     {s.name}
                   </div>
-                  <div style={{ fontSize: 9, color: ROLES[s.role].color }}>{ROLES[s.role].label}</div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 5, flexWrap: "wrap", marginTop: 2 }}>
+                    <span style={{ fontSize: 9, color: ROLES[s.role].color }}>{ROLES[s.role].label}</span>
+                    {s.app && (
+                      <span style={{
+                        display: "inline-flex", alignItems: "center", gap: 3, fontSize: 9, fontWeight: 600,
+                        padding: "1px 6px", borderRadius: 10, flexShrink: 0,
+                        background: "rgba(167,139,250,0.12)", color: "#A78BFA",
+                        border: "1px solid rgba(167,139,250,0.3)",
+                        maxWidth: 90, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                      }}>
+                        <AppWindow size={8} style={{ flexShrink: 0 }} />{s.app}
+                      </span>
+                    )}
+                  </div>
                 </div>
                 <div style={{ width: 80, height: 7, background: "rgba(255,255,255,0.05)", borderRadius: 4, overflow: "hidden", flexShrink: 0 }}>
                   <div style={{

@@ -431,7 +431,7 @@ export default function ServersView() {
     if (envFilter?.test && !(s.env && envFilter.test(s.env))) return false;
     if (filterText) {
       const q = filterText.toLowerCase();
-      if (!s.name.toLowerCase().includes(q) && !(s.app || "").toLowerCase().includes(q) && !(s.statut || "").toLowerCase().includes(q)) return false;
+      if (!s.name.toLowerCase().includes(q) && !(s.app || "").toLowerCase().includes(q) && !(s.statut || "").toLowerCase().includes(q) && !(s.ip || "").toLowerCase().includes(q)) return false;
     }
     return true;
   });
@@ -450,7 +450,7 @@ export default function ServersView() {
           }}>
             <Search size={13} color="#4B5563" style={{ flexShrink: 0 }} />
             <input value={filterText} onChange={e => setFilterText(e.target.value)}
-              placeholder="Filtrer par nom ou application…"
+              placeholder="Filtrer par nom, application ou IP…"
               style={{ flex: 1, background: "transparent", border: "none", color: "#E5E7EB", fontSize: 12, fontFamily: "'JetBrains Mono', monospace", outline: "none" }} />
             {filterText && (
               <button onClick={() => setFilterText("")} style={{ background: "none", border: "none", color: "#4B5563", cursor: "pointer", display: "flex", padding: 0 }}>

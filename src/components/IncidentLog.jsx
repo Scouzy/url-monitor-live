@@ -68,6 +68,7 @@ const TYPE_META = {
 
 const FILTERS = [
   { v: "all",            l: "Tous" },
+  { v: "active",         l: "🔴 Actives" },
   { v: "offline",        l: "Pannes" },
   { v: "online",         l: "Rétablissements" },
   { v: "ssl_expiry",     l: "🔐 SSL" },
@@ -79,14 +80,28 @@ const FILTERS = [
 function IncidentList({ log, onClear }) {
   const [filter, setFilter] = useState("all");
   const [hovered, setHovered] = useState(null);
-  const filtered = log.filter(e => filter === "all" || e.type === filter).slice().reverse();
+
+  /* Ts du dernier rétablissement par URL → acquittement automatique */
+  const latestOnlineTs = {};
+  log.forEach(e => {
+    if (e.type === "online") {
+      if (!latestOnlineTs[e.url] || e.ts > latestOnlineTs[e.url])
+        latestOnlineTs[e.url] = e.ts;
+    }
+  });
+  const isResolved = (e) => e.type === "offline" && !!latestOnlineTs[e.url] && latestOnlineTs[e.url] > e.ts;
+
+  const filtered = log.filter(e => {
+    if (filter === "active") return e.type === "offline" && !isResolved(e);
+    return filter === "all" || e.type === filter;
+  }).slice().reverse();
 
   const grouped = [];
   const groupMap = new Map();
   filtered.forEach(e => {
     const key = `${e.url}||${e.type}`;
     if (!groupMap.has(key)) {
-      const entry = { ...e, count: 1, oldestTs: e.ts };
+      const entry = { ...e, count: 1, oldestTs: e.ts, resolved: isResolved(e) };
       groupMap.set(key, entry);
       grouped.push(entry);
     } else {
@@ -96,7 +111,7 @@ function IncidentList({ log, onClear }) {
     }
   });
 
-  const counts = { all: log.length, offline: 0, online: 0, ssl_expiry: 0, server_alert: 0, capacity_alert: 0 };
+  const counts = { all: log.length, active: log.filter(e => e.type === "offline" && !isResolved(e)).length, offline: 0, online: 0, ssl_expiry: 0, server_alert: 0, capacity_alert: 0 };
   log.forEach(e => { if (counts[e.type] !== undefined) counts[e.type]++; });
 
   return (
@@ -165,6 +180,14 @@ function IncidentList({ log, onClear }) {
                       background: meta.bg, border: `1px solid ${meta.border}`,
                       borderRadius: 8, padding: "1px 8px", flexShrink: 0 }}>
                       ×{e.count}
+                    </span>
+                  )}
+                  {e.resolved && (
+                    <span style={{ fontSize: 10, fontWeight: 700, color: "#34D399",
+                      background: "rgba(52,211,153,0.1)", border: "1px solid rgba(52,211,153,0.25)",
+                      borderRadius: 8, padding: "1px 7px", flexShrink: 0,
+                      display: "inline-flex", alignItems: "center", gap: 3 }}>
+                      <CheckCircle size={8} /> Résolu
                     </span>
                   )}
                   {e.groupName && (
