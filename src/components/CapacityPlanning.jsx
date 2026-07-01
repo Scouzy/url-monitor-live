@@ -62,6 +62,9 @@ function PlanActionModal({ reco, servers, onClose }) {
   const sm = SEVERITY_META[reco.severity];
   const prio = reco.severity === "critical" || reco.severity === "high" ? "high" : "medium";
 
+  const wfName = `Incident capacité – ${reco.server || "Flotte"} (${sm.label})`;
+  const [existingWf] = useState(() => loadWorkflows().find(wf => wf.name === wfName) || null);
+
   const server = reco.server ? servers.find(s => s.name === reco.server) : null;
   const directApp = server?.app || null;
 
@@ -84,10 +87,18 @@ function PlanActionModal({ reco, servers, onClose }) {
     setDone(d => ({ ...d, todo: true }));
   };
 
+  const activateWorkflow = () => {
+    const next = loadWorkflows().map(wf =>
+      wf.id === existingWf.id ? { ...wf, status: "active", updatedAt: new Date().toISOString() } : wf
+    );
+    saveWorkflows(next);
+    setDone(d => ({ ...d, wf: true }));
+  };
+
   const createWorkflow = () => {
     const wfs = loadWorkflows();
     const steps = CAPACITY_WF_STEPS.map(s => makeStep(s));
-    const wf = makeWorkflow({ name: `Incident capacité – ${reco.server || "Flotte"} (${sm.label})`, description: reco.text, wfType: "generic", steps });
+    const wf = makeWorkflow({ name: wfName, description: reco.text, wfType: "generic", steps });
     saveWorkflows([...wfs, wf]);
     setDone(d => ({ ...d, wf: true }));
   };
@@ -141,19 +152,35 @@ function PlanActionModal({ reco, servers, onClose }) {
                   {!done.todo && <div style={{ fontSize: 10, opacity: 0.7, fontWeight: 400, marginTop: 1 }}>Priorité {prio === "high" ? "haute" : "moyenne"} · type Capacité</div>}
                 </div>
               </button>
-              <button onClick={createWorkflow} disabled={done.wf} style={{
-                display: "flex", alignItems: "center", gap: 10, padding: "10px 14px", borderRadius: 10,
-                cursor: done.wf ? "default" : "pointer",
-                background: done.wf ? "rgba(52,211,153,0.08)" : "rgba(99,102,241,0.08)",
-                border: `1px solid ${done.wf ? "rgba(52,211,153,0.3)" : "rgba(99,102,241,0.3)"}`,
-                color: done.wf ? "#34D399" : "#818CF8", fontSize: 12, fontWeight: 600,
-              }}>
-                {done.wf ? <CheckCircle size={14} /> : <GitBranch size={14} />}
-                <div style={{ flex: 1, textAlign: "left" }}>
-                  <div>{done.wf ? "Workflow généré ✓" : "Générer un Workflow d'intervention"}</div>
-                  {!done.wf && <div style={{ fontSize: 10, opacity: 0.7, fontWeight: 400, marginTop: 1 }}>8 étapes · vérification → remédiation → documentation</div>}
-                </div>
-              </button>
+              {existingWf ? (
+                <button onClick={done.wf ? undefined : activateWorkflow} disabled={done.wf} style={{
+                  display: "flex", alignItems: "center", gap: 10, padding: "10px 14px", borderRadius: 10,
+                  cursor: done.wf ? "default" : "pointer",
+                  background: done.wf ? "rgba(52,211,153,0.08)" : "rgba(251,191,36,0.08)",
+                  border: `1px solid ${done.wf ? "rgba(52,211,153,0.3)" : "rgba(251,191,36,0.3)"}`,
+                  color: done.wf ? "#34D399" : "#FBBF24", fontSize: 12, fontWeight: 600,
+                }}>
+                  {done.wf ? <CheckCircle size={14} /> : <GitBranch size={14} />}
+                  <div style={{ flex: 1, textAlign: "left", minWidth: 0 }}>
+                    <div>{done.wf ? "Workflow activé ✓" : "Activer le workflow existant"}</div>
+                    {!done.wf && <div style={{ fontSize: 10, opacity: 0.7, fontWeight: 400, marginTop: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{existingWf.name}</div>}
+                  </div>
+                </button>
+              ) : (
+                <button onClick={done.wf ? undefined : createWorkflow} disabled={done.wf} style={{
+                  display: "flex", alignItems: "center", gap: 10, padding: "10px 14px", borderRadius: 10,
+                  cursor: done.wf ? "default" : "pointer",
+                  background: done.wf ? "rgba(52,211,153,0.08)" : "rgba(99,102,241,0.08)",
+                  border: `1px solid ${done.wf ? "rgba(52,211,153,0.3)" : "rgba(99,102,241,0.3)"}`,
+                  color: done.wf ? "#34D399" : "#818CF8", fontSize: 12, fontWeight: 600,
+                }}>
+                  {done.wf ? <CheckCircle size={14} /> : <GitBranch size={14} />}
+                  <div style={{ flex: 1, textAlign: "left" }}>
+                    <div>{done.wf ? "Workflow généré ✓" : "Générer un Workflow d'intervention"}</div>
+                    {!done.wf && <div style={{ fontSize: 10, opacity: 0.7, fontWeight: 400, marginTop: 1 }}>8 étapes · vérification → remédiation → documentation</div>}
+                  </div>
+                </button>
+              )}
             </div>
           </div>
         </div>
