@@ -2,6 +2,7 @@ import { useState, useMemo, useSyncExternalStore } from "react";
 import {
   Cpu, MemoryStick, HardDrive, TrendingUp, AlertTriangle,
   Layers, Eye, Flame, Trophy, Lightbulb, AppWindow,
+  X, CheckCircle, ClipboardList, GitBranch, Network,
 } from "lucide-react";
 import {
   ResponsiveContainer, ComposedChart, Line, XAxis, YAxis, Tooltip,
@@ -10,6 +11,9 @@ import {
 import { getServers, subscribeServers, fleetTrend, distribution, topConsumers, recommendations, gaugeColor, ROLES } from "../utils/servers";
 import { loadSnapshots } from "../utils/snapshots";
 import { ServerDetail } from "./ServersView";
+import { loadImpacts } from "../utils/appImpactStorage";
+import { makeTodo, loadTodos, saveTodos } from "../utils/todoStorage";
+import { makeWorkflow, makeStep, loadWorkflows, saveWorkflows } from "../utils/workflowStorage";
 
 const METRICS = [
   { id: "cpu",  label: "CPU",    Icon: Cpu,         color: "#818CF8" },
@@ -40,11 +44,130 @@ const cardTitle = (Icon, text, extra) => (
   </div>
 );
 
+/* ── Étapes workflow d'incident capacité (8 étapes) ── */
+const CAPACITY_WF_STEPS = [
+  { title: "Vérifier les métriques",               type: "check",    responsible: "IT",               duration: "10min", description: "Confirmer les valeurs CPU/RAM/Disque en cours sur le serveur concerné" },
+  { title: "Identifier les applications impactées", type: "check",    responsible: "IT / Chef projet",  duration: "15min", description: "Lister toutes les applis hébergées sur ce serveur et évaluer l'impact métier" },
+  { title: "Notifier les équipes",                 type: "notify",   responsible: "Chef de projet",    duration: "5min",  description: "Informer les équipes métier et IT de la situation de saturation" },
+  { title: "Analyser la cause racine",             type: "action",   responsible: "IT",               duration: "20min", description: "Identifier le processus ou la tendance à l'origine de la saturation" },
+  { title: "Définir le plan de remédiation",       type: "approval", responsible: "IT / DSSI",         duration: "30min", description: "Choisir l'action corrective : nettoyage, extension RAM/Disk, migration de charge ou upgrade planifié" },
+  { title: "Mettre en œuvre la remédiation",       type: "script",   responsible: "IT",               duration: "1h",    description: "Exécuter l'action corrective validée" },
+  { title: "Vérifier post-action",                 type: "check",    responsible: "IT",               duration: "15min", description: "Confirmer que les métriques sont revenues à un niveau acceptable (< 75%)" },
+  { title: "Documenter l'incident",                type: "action",   responsible: "IT",               duration: "10min", description: "Rédiger le compte-rendu, les actions et les leçons apprises" },
+];
+
+/* ── Modal Plan d'action ── */
+function PlanActionModal({ reco, servers, onClose }) {
+  const [done, setDone] = useState({ todo: false, wf: false });
+  const sm = SEVERITY_META[reco.severity];
+  const prio = reco.severity === "critical" || reco.severity === "high" ? "high" : "medium";
+
+  const server = reco.server ? servers.find(s => s.name === reco.server) : null;
+  const directApp = server?.app || null;
+
+  const impactedApps = useMemo(() => {
+    const result = new Set();
+    if (directApp) result.add(directApp);
+    try {
+      const { dependencies } = loadImpacts();
+      if (directApp) {
+        dependencies.filter(d => d.to === directApp && d.type === "depends_on").forEach(d => result.add(d.from));
+      }
+    } catch {}
+    return [...result];
+  }, [directApp]);
+
+  const createTodo = () => {
+    const todos = loadTodos();
+    const t = makeTodo({ title: `Incident capacité – ${reco.server || "Flotte"}`, description: reco.text, type: "capacity", priority: prio, source: "Capacity Planning" });
+    saveTodos([...todos, t]);
+    setDone(d => ({ ...d, todo: true }));
+  };
+
+  const createWorkflow = () => {
+    const wfs = loadWorkflows();
+    const steps = CAPACITY_WF_STEPS.map(s => makeStep(s));
+    const wf = makeWorkflow({ name: `Incident capacité – ${reco.server || "Flotte"} (${sm.label})`, description: reco.text, wfType: "generic", steps });
+    saveWorkflows([...wfs, wf]);
+    setDone(d => ({ ...d, wf: true }));
+  };
+
+  return (
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.88)", zIndex: 2000, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+      <div onClick={e => e.stopPropagation()} style={{ background: "#0D1117", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 16, width: "100%", maxWidth: 520, boxShadow: "0 32px 64px rgba(0,0,0,0.9)" }}>
+        {/* Header */}
+        <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "16px 20px", borderBottom: "1px solid rgba(255,255,255,0.07)" }}>
+          <sm.Icon size={15} color={sm.color} />
+          <span style={{ fontSize: 14, fontWeight: 700, color: "#F3F4F6", flex: 1 }}>Plan d'action</span>
+          <span style={{ fontSize: 9, fontWeight: 700, padding: "2px 9px", borderRadius: 10, background: sm.bg, color: sm.color, border: `1px solid ${sm.border}`, textTransform: "uppercase", letterSpacing: "0.05em" }}>{sm.label}</span>
+          <button onClick={onClose} style={{ background: "none", border: "none", color: "#4B5563", cursor: "pointer", display: "flex", padding: 4 }}><X size={14} /></button>
+        </div>
+        <div style={{ padding: "16px 20px", display: "flex", flexDirection: "column", gap: 14 }}>
+          {/* Alerte */}
+          <div style={{ background: sm.bg, border: `1px solid ${sm.border}`, borderRadius: 10, padding: "10px 14px", fontSize: 12, color: "#D1D5DB", lineHeight: 1.6 }}>
+            {reco.text}
+          </div>
+          {/* Applications impactées */}
+          <div>
+            <div style={{ fontSize: 10, fontWeight: 700, color: "#6B7280", textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: 8, display: "flex", alignItems: "center", gap: 5 }}>
+              <Network size={10} /> Applications impactées
+            </div>
+            {impactedApps.length > 0 ? (
+              <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                {impactedApps.map(app => (
+                  <span key={app} style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 11, fontWeight: 600, padding: "4px 10px", borderRadius: 10, background: "rgba(167,139,250,0.12)", color: "#A78BFA", border: "1px solid rgba(167,139,250,0.3)" }}>
+                    <AppWindow size={10} /> {app}
+                  </span>
+                ))}
+              </div>
+            ) : (
+              <div style={{ fontSize: 11, color: "#374151", fontStyle: "italic" }}>Aucune application associée — vérifiez la colonne &laquo;&nbsp;Application&nbsp;&raquo; dans l'import serveurs</div>
+            )}
+          </div>
+          {/* Actions */}
+          <div>
+            <div style={{ fontSize: 10, fontWeight: 700, color: "#6B7280", textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: 8 }}>Actions rapides</div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              <button onClick={createTodo} disabled={done.todo} style={{
+                display: "flex", alignItems: "center", gap: 10, padding: "10px 14px", borderRadius: 10,
+                cursor: done.todo ? "default" : "pointer",
+                background: done.todo ? "rgba(52,211,153,0.08)" : "rgba(251,146,60,0.08)",
+                border: `1px solid ${done.todo ? "rgba(52,211,153,0.3)" : "rgba(251,146,60,0.3)"}`,
+                color: done.todo ? "#34D399" : "#FB923C", fontSize: 12, fontWeight: 600,
+              }}>
+                {done.todo ? <CheckCircle size={14} /> : <ClipboardList size={14} />}
+                <div style={{ flex: 1, textAlign: "left" }}>
+                  <div>{done.todo ? "Tâche créée ✓" : "Créer une tâche dans la TodoList"}</div>
+                  {!done.todo && <div style={{ fontSize: 10, opacity: 0.7, fontWeight: 400, marginTop: 1 }}>Priorité {prio === "high" ? "haute" : "moyenne"} · type Capacité</div>}
+                </div>
+              </button>
+              <button onClick={createWorkflow} disabled={done.wf} style={{
+                display: "flex", alignItems: "center", gap: 10, padding: "10px 14px", borderRadius: 10,
+                cursor: done.wf ? "default" : "pointer",
+                background: done.wf ? "rgba(52,211,153,0.08)" : "rgba(99,102,241,0.08)",
+                border: `1px solid ${done.wf ? "rgba(52,211,153,0.3)" : "rgba(99,102,241,0.3)"}`,
+                color: done.wf ? "#34D399" : "#818CF8", fontSize: 12, fontWeight: 600,
+              }}>
+                {done.wf ? <CheckCircle size={14} /> : <GitBranch size={14} />}
+                <div style={{ flex: 1, textAlign: "left" }}>
+                  <div>{done.wf ? "Workflow généré ✓" : "Générer un Workflow d'intervention"}</div>
+                  {!done.wf && <div style={{ fontSize: 10, opacity: 0.7, fontWeight: 400, marginTop: 1 }}>8 étapes · vérification → remédiation → documentation</div>}
+                </div>
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function CapacityPlanning() {
   const servers = useSyncExternalStore(subscribeServers, getServers);
   const snapshots = useMemo(() => loadSnapshots(), [servers]);
   const [metric, setMetric] = useState("cpu");
   const [selectedServer, setSelectedServer] = useState(null);
+  const [actionReco, setActionReco] = useState(null);
   const isAll = metric === "all";
   const meta = METRICS.find(m => m.id === metric) ?? { id: "all", label: "Vue globale", color: "#9CA3AF" };
 
@@ -361,12 +484,22 @@ export default function CapacityPlanning() {
                     background: `${sm.color}1A`, color: sm.color, border: `1px solid ${sm.border}`,
                     textTransform: "uppercase", letterSpacing: "0.05em",
                   }}>{sm.label}</span>
+                  <button onClick={() => setActionReco(r)} style={{
+                    display: "flex", alignItems: "center", gap: 5, padding: "4px 10px", borderRadius: 8, cursor: "pointer",
+                    background: "rgba(99,102,241,0.1)", border: "1px solid rgba(99,102,241,0.3)",
+                    color: "#818CF8", fontSize: 10, fontWeight: 600, flexShrink: 0, whiteSpace: "nowrap",
+                  }}>
+                    <ClipboardList size={10} /> Plan d'action
+                  </button>
                 </div>
               );
             })}
           </div>
         )}
       </div>
+      {/* ── Modal Plan d'action ── */}
+      {actionReco && <PlanActionModal reco={actionReco} servers={servers} onClose={() => setActionReco(null)} />}
+
       {/* ── Modal détail serveur ── */}
       {selectedServer && (
         <div
