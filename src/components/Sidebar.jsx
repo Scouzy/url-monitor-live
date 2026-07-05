@@ -131,7 +131,7 @@ const MODULES = [
   { id: "parametres", label: "Paramètres",        Icon: Settings },
 ];
 
-export default function Sidebar({ groups, activeGroupId, onSelect, onAddGroup, onRemoveGroup, onRenameGroup, open, onToggle, checkingIds, totalUrls, totalOnline, onImport, activeModule = "monitor", onSelectModule, journalBadge = 0, todoBadge = 0, serversBadge = 0 }) {
+export default function Sidebar({ groups, activeGroupId, onSelect, onAddGroup, onRemoveGroup, onRenameGroup, open, onToggle, checkingIds, totalUrls, totalOnline, onImport, activeModule = "monitor", onSelectModule, journalBadge = 0, todoBadge = 0, serversBadge = 0, agentsBadge = 0 }) {
   const [adding, setAdding] = useState(false);
   const [newName, setNewName] = useState("");
   const [editingId, setEditingId] = useState(null);
@@ -201,8 +201,8 @@ export default function Sidebar({ groups, activeGroupId, onSelect, onAddGroup, o
       <div style={{ padding: "4px 8px", borderBottom: "1px solid rgba(255,255,255,0.06)", paddingBottom: 10 }}>
         {MODULES.map(({ id, label, Icon }) => {
           const isActive = activeModule === id;
-          const badge    = id === "journal"    ? journalBadge  : 0;
-          const greenBadge = id === "todo"    ? todoBadge     : id === "servers" ? serversBadge : 0;
+          const badge      = id === "journal" ? journalBadge : id === "servers" ? agentsBadge : 0;
+          const greenBadge = id === "todo"   ? todoBadge    : id === "servers" ? serversBadge : 0;
           return (
             <div key={id}
               onClick={() => onSelectModule?.(id)}

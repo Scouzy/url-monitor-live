@@ -1,4 +1,4 @@
-import { saveSnapshot, clearSnapshots } from "./snapshots";
+import { saveSnapshot, loadSnapshots, clearSnapshots } from "./snapshots";
 
 /* ── Générateur de données serveurs (simulation déterministe, seedée) ── */
 
@@ -198,7 +198,7 @@ export function normalizeServer(raw, idx) {
   let name = pick("name", "nom", "serveur", "server", "hostname", "servername", "serveurname", "nomserveur", "nomduserveur", "nomdeserveur", "machine", "host", "libelle", "label");
   const role = normalizeRole(pick("role", "roleserveur", "typeserveur", "typedeserveur", "categorie"));
   const env = pick("env", "environnement", "environment", "envt", "environnements");
-  let app = pick("application", "appli", "applications", "applicationname", "nomapplication", "nomdelapplication", "service", "servicename", "nomservice", "nomduservice");
+  let app = pick("app", "application", "appli", "applications", "applicationname", "nomapplication", "nomdelapplication", "service", "servicename", "nomservice", "nomduservice");
   /* Heuristique : toute colonne dont le nom contient "appli" */
   if (app === undefined) {
     for (const k of Object.keys(flat)) {
@@ -359,6 +359,75 @@ export function resetServers() {
 export function subscribeServers(fn) {
   _listeners.add(fn);
   return () => _listeners.delete(fn);
+}
+
+/* ── Mise à jour depuis un agent VPS ── */
+export function patchServerMetrics(name, metrics) {
+  if (!_cache) _cache = loadPersisted() || SERVER_DEFS.map(genServer);
+
+  const role    = metrics.role || "web";
+  const defGrow = { web: 1.2, bdd: 2.0, applicatif: 1.5, cache: 0.8 }[role] ?? 1.2;
+  const osName  = typeof metrics.os === "object"
+    ? (metrics.os?.name || (metrics.os?.agentType === "windows" ? "Windows" : "Linux"))
+    : (metrics.os || "Linux");
+
+  const base = {
+    cpu:  clamp(Math.round(metrics.cpu  ?? 0)),
+    ram:  clamp(Math.round(metrics.ram  ?? 0)),
+    disk: clamp(Math.round(metrics.disk ?? 0)),
+  };
+  const agentIp = (() => { try { return new URL(metrics.agentUrl || "").hostname; } catch { return metrics.hostname || ""; } })();
+  const patch = {
+    ...base,
+    uptimeDays:   Math.round(metrics.uptimeDays ?? 0),
+    lastVpsCheck: Date.now(),
+    os:  osName,
+    ip:  agentIp,
+    ...(metrics.ramGb  != null ? { ramGb:  Math.round(metrics.ramGb  * 10) / 10 } : {}),
+    ...(metrics.diskGb != null ? { diskGb: Math.round(metrics.diskGb * 10) / 10 } : {}),
+  };
+
+  const idx = _cache.findIndex(s => s.name.toLowerCase() === name.toLowerCase());
+  if (idx >= 0) {
+    const growthRate = _cache[idx].growthRate || defGrow;
+    const { history24h, monthly } = buildSeries(base, growthRate, strSeed(name));
+    _cache = _cache.map((s, i) => i !== idx ? s : { ...s, ...patch, history24h, monthly });
+  } else {
+    const { history24h, monthly } = buildSeries(base, defGrow, strSeed(name));
+    _cache = [..._cache, {
+      id:         `vps-${metrics.hostname || name}`,
+      name,
+      role,
+      env:        metrics.env  || "Production",
+      app:        metrics.app  || "",
+      ip:         (() => { try { return new URL(metrics.agentUrl || "").hostname; } catch { return metrics.hostname || ""; } })(),
+      source:     "vps-agent",
+      growthRate: defGrow,
+      history24h,
+      monthly,
+      ...patch,
+    }];
+  }
+
+  /* Snapshot throttlé — max 1 par 6 h par serveur (pour buildTrendChartData) */
+  const SIX_H = 6 * 3_600_000;
+  const snaps = loadSnapshots();
+  const last  = [...snaps].reverse().find(s => s.servers?.[name] != null);
+  if (!last || Date.now() - last.ts > SIX_H) {
+    saveSnapshot(_cache.filter(s => s.source === "vps-agent"), "vps-agent", `Agents VPS`);
+  }
+
+  /* Persistance : préserver les lignes brutes originales, mettre à jour uniquement les métriques */
+  try {
+    const existing = JSON.parse(localStorage.getItem(LS_KEY) || "{}");
+    const rawRows  = Array.isArray(existing.rows) ? existing.rows : _cache;
+    const updated  = _cache.map(s => {
+      const orig = rawRows.find(r => (r.name || r.nom || r.serveur || "").toLowerCase() === s.name.toLowerCase());
+      return orig ? { ...orig, cpu: s.cpu, ram: s.ram, disk: s.disk, os: s.os, ip: s.ip, uptimeDays: s.uptimeDays, lastVpsCheck: s.lastVpsCheck, ramGb: s.ramGb, diskGb: s.diskGb, source: s.source } : s;
+    });
+    localStorage.setItem(LS_KEY, JSON.stringify({ meta: _meta, rows: updated }));
+  } catch {}
+  _listeners.forEach(fn => fn());
 }
 
 /* ── Agrégats Capacity Planning ── */

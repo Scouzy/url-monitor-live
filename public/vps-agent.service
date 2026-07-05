@@ -1,0 +1,21 @@
+[Unit]
+Description=G1Oeil VPS Metrics Agent (Linux)
+After=network.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+User=nobody
+ExecStart=/usr/bin/python3 /opt/g1oeil/vps-agent-linux.py 9099 /var/log /home /tmp /opt /var/www
+Restart=always
+RestartSec=15
+StandardOutput=journal
+StandardError=journal
+# Contraintes ressources : faible impact sur l'hôte
+CPUQuota=5%
+MemoryMax=64M
+Nice=19
+IOSchedulingClass=idle
+
+[Install]
+WantedBy=multi-user.target

@@ -259,17 +259,26 @@ export default function AppImpactMap() {
   const appGroups = useMemo(() => {
     const map = new Map();
     for (const s of servers) {
-      const key = s.app || "— Sans application —";
-      if (!map.has(key)) map.set(key, []);
-      map.get(key).push(s);
+      if (s.app) {
+        if (!map.has(s.app)) map.set(s.app, []);
+        map.get(s.app).push(s);
+      } else {
+        /* Pas d'application : carte individuelle avec le nom du serveur */
+        const key = `\x00srv\x00${s.id || s.name}`;
+        map.set(key, [s]);
+      }
     }
-    return Array.from(map.entries()).map(([name, srvs]) => ({
-      name,
-      servers: srvs,
-      cpuAvg: avgMetric(srvs, "cpu"),
-      ramAvg: avgMetric(srvs, "ram"),
-      diskAvg: avgMetric(srvs, "disk"),
-    }));
+    return Array.from(map.entries()).map(([key, srvs]) => {
+      const isSrv = key.startsWith("\x00srv\x00");
+      return {
+        name:     isSrv ? srvs[0].name : key,
+        isSrv,
+        servers:  srvs,
+        cpuAvg:   avgMetric(srvs, "cpu"),
+        ramAvg:   avgMetric(srvs, "ram"),
+        diskAvg:  avgMetric(srvs, "disk"),
+      };
+    });
   }, [servers]);
 
   const appNames = appGroups.map(g => g.name);
@@ -401,11 +410,12 @@ export default function AppImpactMap() {
                       onMouseEnter={e => { if (!isSel) e.currentTarget.style.borderColor = "rgba(255,255,255,0.16)"; }}
                       onMouseLeave={e => { if (!isSel) e.currentTarget.style.borderColor = "rgba(255,255,255,0.08)"; }}
                     >
-                      <div style={{ fontWeight: 700, fontSize: 13, color: "#E5E7EB", marginBottom: 4, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      <div style={{ fontWeight: 700, fontSize: 13, color: app.isSrv ? "#9CA3AF" : "#E5E7EB", marginBottom: 4, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", display: "flex", alignItems: "center", gap: 5 }}>
+                        {app.isSrv && <Server size={11} color="#4B5563" />}
                         {app.name}
                       </div>
                       <div style={{ fontSize: 10, color: "#4B5563", marginBottom: 10, display: "flex", alignItems: "center", gap: 4 }}>
-                        <Server size={9} /> {app.servers.length} serveur{app.servers.length !== 1 ? "s" : ""}
+                        {app.isSrv ? <span style={{ color: "#374151", fontStyle: "italic" }}>Sans application</span> : <><Server size={9} /> {app.servers.length} serveur{app.servers.length !== 1 ? "s" : ""}</>}
                       </div>
                       {app.cpuAvg != null && (
                         <div style={{ marginBottom: 5 }}>

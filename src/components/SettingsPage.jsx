@@ -3,12 +3,15 @@ import {
   RefreshCw, Bell, BellOff, Lock, Server, Zap, Play, Pause,
   CheckCircle, Github, Info, Database, GitBranch, Network,
   ClipboardList, Trash2, BarChart3, Globe, ShieldCheck,
+  Plus, X, Activity, Download, Pencil, Check,
 } from "lucide-react";
 import { saveCapacitySettings } from "../utils/capacitySettings";
 import { clearSnapshots } from "../utils/snapshots";
 import { loadWorkflows } from "../utils/workflowStorage";
 import { loadImpacts } from "../utils/appImpactStorage";
 import { loadTodos } from "../utils/todoStorage";
+import { loadVpsAgents, saveVpsAgents, makeVpsAgent, fetchVpsMetrics } from "../utils/vpsAgents";
+import { patchServerMetrics } from "../utils/servers";
 
 /* ── helpers UI ── */
 const card = { background: "rgba(255,255,255,0.025)", border: "1px solid rgba(255,255,255,0.07)", borderRadius: 14, overflow: "hidden" };
@@ -75,6 +78,50 @@ export default function SettingsPage({
   allServers, onNavigate,
 }) {
   const [confirmReset, setConfirmReset] = useState(false);
+  const [vpsAgents, setVpsAgents]         = useState(() => loadVpsAgents());
+  const [newAgent,  setNewAgent]           = useState({ name: "", url: "" });
+  const [agentStatus, setAgentStatus]      = useState({});
+  const [refreshingAll, setRefreshingAll]  = useState(false);
+  const [editingAgent, setEditingAgent]    = useState(null);  // { id, name, url }
+
+  const testAgent = async (agent) => {
+    setAgentStatus(s => ({ ...s, [agent.id]: "loading" }));
+    try {
+      const m = await fetchVpsMetrics(agent.url);
+      patchServerMetrics(agent.name, { ...m, env: agent.env, app: agent.app || agent.name, role: agent.role, agentUrl: agent.url });
+      setAgentStatus(s => ({ ...s, [agent.id]: { ok: true, cpu: m.cpu, ram: m.ram, disk: m.disk } }));
+    } catch (e) {
+      setAgentStatus(s => ({ ...s, [agent.id]: { ok: false, error: e.message || "Connexion échouée" } }));
+    }
+  };
+
+  const addAgent = () => {
+    if (!newAgent.name.trim() || !newAgent.url.trim()) return;
+    const agent = makeVpsAgent(newAgent);
+    const updated = [...vpsAgents, agent];
+    setVpsAgents(updated); saveVpsAgents(updated);
+    setNewAgent({ name: "", url: "" });
+  };
+
+  const removeAgent = (id) => {
+    const updated = vpsAgents.filter(a => a.id !== id);
+    setVpsAgents(updated); saveVpsAgents(updated);
+    setAgentStatus(s => { const n = { ...s }; delete n[id]; return n; });
+  };
+
+  const saveEditAgent = () => {
+    if (!editingAgent || !editingAgent.name.trim() || !editingAgent.url.trim()) return;
+    const url = editingAgent.url.trim().replace(/\/+$/, "");
+    const updated = vpsAgents.map(a => a.id === editingAgent.id ? { ...a, name: editingAgent.name.trim(), url } : a);
+    setVpsAgents(updated); saveVpsAgents(updated);
+    setEditingAgent(null);
+  };
+
+  const refreshAll = async () => {
+    setRefreshingAll(true);
+    for (const agent of vpsAgents.filter(a => a.enabled)) await testAgent(agent);
+    setRefreshingAll(false);
+  };
 
   const workflows = loadWorkflows();
   const impacts   = loadImpacts();
@@ -285,6 +332,14 @@ export default function SettingsPage({
             </div>
           </div>
         </div>
+      </div>
+
+      {/* ── Agents VPS ── déplacé dans Serveurs > Configuration agents ── */}
+      <div style={{ ...card, padding: "14px 18px", display: "flex", alignItems: "center", gap: 12 }}>
+        <Activity size={14} style={{ color: "#818CF8", flexShrink: 0 }} />
+        <span style={{ fontSize: 12, color: "#6B7280" }}>
+          La configuration des agents VPS a été déplacée dans <strong style={{ color: "#E5E7EB" }}>Serveurs → Configuration agents</strong>.
+        </span>
       </div>
 
       {/* ── Données & Stockage ── */}

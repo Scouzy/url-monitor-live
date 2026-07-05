@@ -16,9 +16,12 @@ import ServerImport from "./components/ServerImport";
 import TodoList from "./components/TodoList";
 import WorkflowEditor from "./components/WorkflowEditor";
 import AppImpactMap from "./components/AppImpactMap";
+import AgentsView from "./components/AgentsView";
+import VpsAgentsConfig from "./components/VpsAgentsConfig";
 import SettingsPage from "./components/SettingsPage";
 import DashboardPage from "./components/DashboardPage";
-import { subscribeServers, getServers, recommendations as getRecos } from "./utils/servers";
+import { subscribeServers, getServers, recommendations as getRecos, patchServerMetrics } from "./utils/servers";
+import { loadVpsAgents, fetchVpsMetrics, setAgentMetrics, setAgentError, subscribeAgents, getAllAgentMetrics } from "./utils/vpsAgents";
 import { loadCapacitySettings, saveCapacitySettings } from "./utils/capacitySettings";
 import { loadTodos } from "./utils/todoStorage";
 import { clearSnapshots } from "./utils/snapshots";
@@ -42,12 +45,34 @@ export default function App() {
   const [incidentLog, setIncidentLog] = useState(() => loadLog());
   const [mainTab, setMainTab] = useState(() => localStorage.getItem("g1oeil_tab") || "surveillance");
   const [activeModule, setActiveModule] = useState(() => localStorage.getItem("g1oeil_module") || "dashboard");
+  const [serverSubTab, setServerSubTab] = useState("inventory");
   const [notifEnabled, setNotifEnabled] = useState(() => typeof Notification !== "undefined" && Notification.permission === "granted");
   const [capacitySettings, setCapacitySettings] = useState(() => loadCapacitySettings());
-  const allServers = useSyncExternalStore(subscribeServers, getServers);
+  const allServers    = useSyncExternalStore(subscribeServers, getServers);
+  const agentsMetrics = useSyncExternalStore(subscribeAgents, getAllAgentMetrics);
+  const agentsBadge   = Object.values(agentsMetrics).filter(e => e.status === "error").length;
   const [todoBadge, setTodoBadge] = useState(() => loadTodos().filter(t => t.status !== "done").length);
 
   useEffect(() => { localStorage.setItem("g1oeil_module", activeModule); }, [activeModule]);
+
+  /* ── Polling automatique des agents VPS (toutes les 60s) ── */
+  useEffect(() => {
+    const poll = async () => {
+      const agents = loadVpsAgents().filter(a => a.enabled);
+      for (const agent of agents) {
+        try {
+          const m = await fetchVpsMetrics(agent.url);
+          setAgentMetrics(agent.id, m, "ok");
+          patchServerMetrics(agent.name, { ...m, env: agent.env, app: agent.app || agent.name, role: agent.role, agentUrl: agent.url });
+        } catch (e) {
+          setAgentError(agent.id, e.message || "Injoignable");
+        }
+      }
+    };
+    poll();
+    const id = setInterval(poll, 60_000);
+    return () => clearInterval(id);
+  }, []);
   useEffect(() => { localStorage.setItem("g1oeil_tab", mainTab); }, [mainTab]);
 
   useEffect(() => {
@@ -408,6 +433,7 @@ export default function App() {
         journalBadge={incidentLog.filter(e => e.type !== "online").length}
         todoBadge={todoBadge}
         serversBadge={allServers.length}
+        agentsBadge={agentsBadge}
         onSelectModule={(id) => {
           if (id === "journal" || id === "parametres") { setActiveModule("monitor"); setMainTab(id); }
           else { setActiveModule(id); setMainTab("surveillance"); }
@@ -426,17 +452,40 @@ export default function App() {
           }}>
             <div>
               <h1 style={{ fontSize: 16, fontWeight: 700, color: "#F9FAFB", margin: 0 }}>
-                {{ dashboard: "Dashboard", servers: "Inventaire serveurs", capacity: "Capacity Planning", todo: "TodoList", workflows: "Workflows", impacts: "Impacts Applicatifs", journal: "Journal des alertes", parametres: "Paramètres" }[activeModule] || activeModule}
+                {activeModule === "servers"
+                  ? ({ inventory: "Inventaire serveurs", agents: "Agents VPS", config: "Configuration agents" }[serverSubTab] || "Serveurs")
+                  : ({ dashboard: "Dashboard", capacity: "Capacity Planning", todo: "TodoList", workflows: "Workflows", impacts: "Impacts Applicatifs", journal: "Journal des alertes", parametres: "Paramètres" }[activeModule] || activeModule)}
               </h1>
               <p style={{ fontSize: 11, color: "#4B5563", margin: 0 }}>
-                {{ dashboard: "Vue synthetique - KPIs - alertes - SSL - performance", servers: "CPU, RAM et disque en temps réel par serveur", capacity: "Projections 6 mois · seuil critique 90% · recommandations", todo: "Tâches en cours · auto-générées + manuelles", workflows: "Création et gestion de procédures d’intervention pas à pas", impacts: "Cartographie des dépendances entre applications et serveurs", journal: "Historique des événements · pannes · SSL · serveurs", parametres: "Configuration de l'application" }[activeModule] || ""}
+                {activeModule === "servers"
+                  ? ({ inventory: "CPU, RAM et disque en temps réel par serveur", agents: "Supervision temps réel · Linux & Windows · CPU / RAM / Disque / Réseau / Processus / Répertoires", config: "Ajouter · modifier · tester les agents VPS · télécharger les scripts" }[serverSubTab] || "")
+                  : ({ dashboard: "Vue synthetique - KPIs - alertes - SSL - performance", capacity: "Projections 6 mois · seuil critique 90% · recommandations", todo: "Tâches en cours · auto-générées + manuelles", workflows: "Création et gestion de procédures d'intervention pas à pas", impacts: "Cartographie des dépendances entre applications et serveurs", journal: "Historique des événements · pannes · SSL · serveurs", parametres: "Configuration de l'application" }[activeModule] || "")}
               </p>
             </div>
-            {activeModule === "servers" && <ServerImport />}
+            {activeModule === "servers" && serverSubTab === "inventory" && <ServerImport />}
           </header>
+          {/* Sous-onglets Serveurs */}
+          {activeModule === "servers" && (
+            <div style={{ display: "flex", gap: 4, padding: "0 24px 0", borderBottom: "1px solid rgba(255,255,255,0.06)", background: "rgba(255,255,255,0.01)" }}>
+              {[
+                { id: "inventory", label: "Inventaire" },
+                { id: "agents",    label: `Agents VPS${agentsBadge > 0 ? ` (${agentsBadge} ✗)` : ""}` },
+                { id: "config",    label: "Configuration agents" },
+              ].map(({ id, label }) => (
+                <button key={id} onClick={() => setServerSubTab(id)} style={{
+                  padding: "9px 16px", fontSize: 12, fontWeight: serverSubTab === id ? 700 : 400,
+                  color: serverSubTab === id ? "#818CF8" : "#6B7280",
+                  background: "transparent", border: "none", borderBottom: serverSubTab === id ? "2px solid #818CF8" : "2px solid transparent",
+                  cursor: "pointer", transition: "color 0.15s",
+                }}>{label}</button>
+              ))}
+            </div>
+          )}
           <main style={{ flex: 1, padding: activeModule === "workflows" || activeModule === "impacts" ? 0 : "20px 24px 48px", overflowY: activeModule === "workflows" || activeModule === "impacts" ? "hidden" : "auto", display: "flex", flexDirection: "column" }}>
             {activeModule === "dashboard" && <DashboardPage groups={groups} allUrls={allUrls} allServers={allServers} incidentLog={incidentLog} capacitySettings={capacitySettings} />}
-            {activeModule === "servers"   && <ServersView />}
+            {activeModule === "servers"   && serverSubTab === "inventory" && <ServersView />}
+            {activeModule === "servers"   && serverSubTab === "agents"    && <AgentsView />}
+            {activeModule === "servers"   && serverSubTab === "config"    && <VpsAgentsConfig />}
             {activeModule === "capacity"  && <CapacityPlanning />}
             {activeModule === "todo"      && <TodoList servers={allServers} allUrls={allUrls} />}
             {activeModule === "workflows" && <WorkflowEditor />}
