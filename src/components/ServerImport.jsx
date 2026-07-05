@@ -62,6 +62,7 @@ export default function ServerImport() {
   const [api, setApi] = useState(loadApiConfig);
   const [loading, setLoading] = useState(false);
   const [showSecret, setShowSecret] = useState(false);
+  const [confirmReset, setConfirmReset] = useState(false);
   const meta = getServersMeta();
 
   const flash = (m) => { setMsg(m); setTimeout(() => setMsg(null), 5000); };
@@ -151,10 +152,17 @@ export default function ServerImport() {
         <button style={btn("#6B7280")} onClick={downloadTemplate} title="Télécharger le modèle Excel">
           <Download size={13} /> Modèle
         </button>
-        {meta.source !== "demo" && (
-          <button style={btn("#F87171")} onClick={() => { resetServers(); flash({ ok: true, text: "Données de démo restaurées" }); }} title="Revenir aux données de démo">
-            <RotateCcw size={13} />
+        {meta.source !== "demo" && !confirmReset && (
+          <button style={btn("#F87171")} onClick={() => setConfirmReset(true)} title="Supprimer tous les serveurs importés">
+            <RotateCcw size={13} /> Effacer
           </button>
+        )}
+        {confirmReset && (
+          <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "5px 10px", borderRadius: 9, background: "rgba(248,113,113,0.08)", border: "1px solid rgba(248,113,113,0.3)" }}>
+            <span style={{ fontSize: 11, color: "#F87171", fontWeight: 600 }}>Supprimer tous les serveurs + snapshots ?</span>
+            <button style={{ ...btn("#F87171"), padding: "3px 10px" }} onClick={() => { resetServers(); setConfirmReset(false); flash({ ok: true, text: "Inventaire effacé — données de démo restaurées" }); }}>Oui</button>
+            <button style={{ ...btn("#6B7280"), padding: "3px 10px" }} onClick={() => setConfirmReset(false)}>Non</button>
+          </div>
         )}
       </div>
 

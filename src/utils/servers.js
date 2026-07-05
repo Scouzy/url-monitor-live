@@ -356,6 +356,13 @@ export function resetServers() {
   _listeners.forEach(fn => fn());
 }
 
+export function removeServer(id) {
+  if (!_cache) _cache = loadPersisted() || SERVER_DEFS.map(genServer);
+  _cache = _cache.filter(s => s.id !== id);
+  try { localStorage.setItem(LS_KEY, JSON.stringify({ meta: _meta, rows: _cache })); } catch {}
+  _listeners.forEach(fn => fn());
+}
+
 export function subscribeServers(fn) {
   _listeners.add(fn);
   return () => _listeners.delete(fn);

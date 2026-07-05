@@ -18,6 +18,7 @@ import WorkflowEditor from "./components/WorkflowEditor";
 import AppImpactMap from "./components/AppImpactMap";
 import AgentsView from "./components/AgentsView";
 import VpsAgentsConfig from "./components/VpsAgentsConfig";
+import AgentDeployMass from "./components/AgentDeployMass";
 import SettingsPage from "./components/SettingsPage";
 import DashboardPage from "./components/DashboardPage";
 import { subscribeServers, getServers, recommendations as getRecos, patchServerMetrics } from "./utils/servers";
@@ -453,12 +454,12 @@ export default function App() {
             <div>
               <h1 style={{ fontSize: 16, fontWeight: 700, color: "#F9FAFB", margin: 0 }}>
                 {activeModule === "servers"
-                  ? ({ inventory: "Inventaire serveurs", agents: "Agents VPS", config: "Configuration agents" }[serverSubTab] || "Serveurs")
+                  ? ({ inventory: "Inventaire serveurs", agents: "Agents VPS", config: "Configuration agents", deploy: "Déploiement en masse" }[serverSubTab] || "Serveurs")
                   : ({ dashboard: "Dashboard", capacity: "Capacity Planning", todo: "TodoList", workflows: "Workflows", impacts: "Impacts Applicatifs", journal: "Journal des alertes", parametres: "Paramètres" }[activeModule] || activeModule)}
               </h1>
               <p style={{ fontSize: 11, color: "#4B5563", margin: 0 }}>
                 {activeModule === "servers"
-                  ? ({ inventory: "CPU, RAM et disque en temps réel par serveur", agents: "Supervision temps réel · Linux & Windows · CPU / RAM / Disque / Réseau / Processus / Répertoires", config: "Ajouter · modifier · tester les agents VPS · télécharger les scripts" }[serverSubTab] || "")
+                  ? ({ inventory: "CPU, RAM et disque en temps réel par serveur", agents: "Supervision temps réel · Linux & Windows · CPU / RAM / Disque / Réseau / Processus / Répertoires", config: "Ajouter · modifier · tester les agents VPS · télécharger les scripts", deploy: "Scripts pré-remplis SSH · WinRM · Ansible pour déployer les agents sur tout l'inventaire" }[serverSubTab] || "")
                   : ({ dashboard: "Vue synthetique - KPIs - alertes - SSL - performance", capacity: "Projections 6 mois · seuil critique 90% · recommandations", todo: "Tâches en cours · auto-générées + manuelles", workflows: "Création et gestion de procédures d'intervention pas à pas", impacts: "Cartographie des dépendances entre applications et serveurs", journal: "Historique des événements · pannes · SSL · serveurs", parametres: "Configuration de l'application" }[activeModule] || "")}
               </p>
             </div>
@@ -471,6 +472,7 @@ export default function App() {
                 { id: "inventory", label: "Inventaire" },
                 { id: "agents",    label: `Agents VPS${agentsBadge > 0 ? ` (${agentsBadge} ✗)` : ""}` },
                 { id: "config",    label: "Configuration agents" },
+                { id: "deploy",    label: "Déploiement" },
               ].map(({ id, label }) => (
                 <button key={id} onClick={() => setServerSubTab(id)} style={{
                   padding: "9px 16px", fontSize: 12, fontWeight: serverSubTab === id ? 700 : 400,
@@ -486,6 +488,7 @@ export default function App() {
             {activeModule === "servers"   && serverSubTab === "inventory" && <ServersView />}
             {activeModule === "servers"   && serverSubTab === "agents"    && <AgentsView />}
             {activeModule === "servers"   && serverSubTab === "config"    && <VpsAgentsConfig />}
+            {activeModule === "servers"   && serverSubTab === "deploy"    && <AgentDeployMass />}
             {activeModule === "capacity"  && <CapacityPlanning />}
             {activeModule === "todo"      && <TodoList servers={allServers} allUrls={allUrls} />}
             {activeModule === "workflows" && <WorkflowEditor />}

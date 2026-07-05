@@ -8,7 +8,7 @@ import {
   ResponsiveContainer, AreaChart, Area, XAxis, YAxis, Tooltip, CartesianGrid,
   ComposedChart, Line, ReferenceLine,
 } from "recharts";
-import { getServers, subscribeServers, ROLES, gaugeColor } from "../utils/servers";
+import { getServers, subscribeServers, ROLES, gaugeColor, removeServer } from "../utils/servers";
 import { loadSnapshots, lastDelta, buildTrendChartData } from "../utils/snapshots";
 import ServerGauge from "./ServerGauge";
 
@@ -425,6 +425,7 @@ export default function ServersView() {
   const [filterText, setFilterText] = useState("");
   const [filterEnv, setFilterEnv]   = useState("all");
   const [selectedId, setSelectedId] = useState(null);
+  const [deleteConfirm, setDeleteConfirm] = useState(null);
 
   const envFilter = ENV_FILTERS.find(f => f.id === filterEnv);
   const filtered = servers.filter(s => {
@@ -475,19 +476,40 @@ export default function ServersView() {
           {filtered.map((s, i) => {
             const isSel = s.id === selectedId;
             const worst = Math.max(s.cpu, s.ram, s.disk);
+            const isDelConfirm = deleteConfirm === s.id;
             return (
               <div key={s.id}
-                onClick={() => setSelectedId(isSel ? null : s.id)}
+                onClick={() => { if (!isDelConfirm) setSelectedId(isSel ? null : s.id); }}
                 style={{
+                  position: "relative",
                   background: isSel ? "rgba(99,102,241,0.08)" : "rgba(255,255,255,0.025)",
-                  border: `1px solid ${isSel ? "rgba(99,102,241,0.45)" : "rgba(255,255,255,0.07)"}`,
+                  border: `1px solid ${isDelConfirm ? "rgba(248,113,113,0.45)" : isSel ? "rgba(99,102,241,0.45)" : "rgba(255,255,255,0.07)"}`,
                   borderRadius: 14, padding: 16, cursor: "pointer",
                   transition: "border-color 0.15s, background 0.15s, transform 0.1s",
                   animation: `fadeIn 0.3s ease ${i * 0.04}s both`,
                 }}
-                onMouseEnter={e => { if (!isSel) e.currentTarget.style.borderColor = "rgba(255,255,255,0.18)"; }}
-                onMouseLeave={e => { if (!isSel) e.currentTarget.style.borderColor = "rgba(255,255,255,0.07)"; }}
+                onMouseEnter={e => { if (!isSel && !isDelConfirm) e.currentTarget.style.borderColor = "rgba(255,255,255,0.18)"; }}
+                onMouseLeave={e => { if (!isSel && !isDelConfirm) e.currentTarget.style.borderColor = "rgba(255,255,255,0.07)"; }}
               >
+                {/* Bouton suppression */}
+                {isDelConfirm ? (
+                  <div onClick={e => e.stopPropagation()} style={{ position: "absolute", top: 8, right: 8, display: "flex", alignItems: "center", gap: 4, background: "rgba(15,18,27,0.95)", border: "1px solid rgba(248,113,113,0.4)", borderRadius: 8, padding: "4px 6px", zIndex: 5 }}>
+                    <span style={{ fontSize: 10, color: "#F87171", fontWeight: 600, whiteSpace: "nowrap" }}>Supprimer ?</span>
+                    <button onClick={() => { removeServer(s.id); setDeleteConfirm(null); setSelectedId(null); }}
+                      style={{ fontSize: 10, padding: "2px 8px", borderRadius: 5, background: "rgba(248,113,113,0.2)", border: "1px solid rgba(248,113,113,0.4)", color: "#F87171", cursor: "pointer", fontWeight: 700 }}>Oui</button>
+                    <button onClick={() => setDeleteConfirm(null)}
+                      style={{ fontSize: 10, padding: "2px 8px", borderRadius: 5, background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)", color: "#9CA3AF", cursor: "pointer" }}>Non</button>
+                  </div>
+                ) : (
+                  <button onClick={e => { e.stopPropagation(); setDeleteConfirm(s.id); }}
+                    title="Supprimer ce serveur"
+                    style={{ position: "absolute", top: 8, right: 8, background: "none", border: "none", color: "transparent", cursor: "pointer", padding: 4, borderRadius: 5, display: "flex", alignItems: "center", transition: "color 0.15s" }}
+                    onMouseEnter={e => e.currentTarget.style.color = "#F87171"}
+                    onMouseLeave={e => e.currentTarget.style.color = "transparent"}
+                  >
+                    <X size={13} />
+                  </button>
+                )}
                 {/* En-tête card */}
                 <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginBottom: 12, gap: 6, flexWrap: "wrap" }}>
                   <div style={{ display: "flex", alignItems: "flex-start", gap: 8 }}>
