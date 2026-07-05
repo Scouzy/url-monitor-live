@@ -161,19 +161,20 @@ export default function DashboardPage({ groups = [], allUrls = [], allServers = 
 
   /* Distributions CPU / RAM / Disque par tranche */
   const TRANCHES = [
-    { label: "0–25%",   min: 0,  max: 25,  color: "#6366F1" },
-    { label: "25–50%",  min: 25, max: 50,  color: "#818CF8" },
-    { label: "50–75%",  min: 50, max: 75,  color: "#FBBF24" },
-    { label: "75–90%",  min: 75, max: 90,  color: "#FB923C" },
-    { label: "90–100%", min: 90, max: 101, color: "#F87171" },
+    { label: "0–25%",   min: 0,  max: 25,  opacity: 0.35 },
+    { label: "25–50%",  min: 25, max: 50,  opacity: 0.55 },
+    { label: "50–75%",  min: 50, max: 75,  opacity: 0.75 },
+    { label: "75–90%",  min: 75, max: 90,  opacity: 0.90 },
+    { label: "90–100%", min: 90, max: 101, opacity: 1.00 },
   ];
-  const makeTranches = (key) => TRANCHES.map(t => ({
+  const makeTranches = (key, accent) => TRANCHES.map(t => ({
     ...t,
+    color: accent,
     count: allServers.filter(s => (s[key] ?? 0) >= t.min && (s[key] ?? 0) < t.max).length,
   }));
-  const cpuTranches  = makeTranches("cpu");
-  const ramTranches  = makeTranches("ram");
-  const diskTranches = makeTranches("disk");
+  const cpuTranches  = makeTranches("cpu",  "#818CF8");
+  const ramTranches  = makeTranches("ram",  "#F472B6");
+  const diskTranches = makeTranches("disk", "#FBBF24");
   const maxCpu  = Math.max(...cpuTranches.map(t => t.count),  1);
   const maxRam  = Math.max(...ramTranches.map(t => t.count),  1);
   const maxDisk = Math.max(...diskTranches.map(t => t.count), 1);
@@ -405,11 +406,12 @@ export default function DashboardPage({ groups = [], allUrls = [], allServers = 
                         <div style={{ flex: 1, height: 16, background: "rgba(255,255,255,0.04)", borderRadius: 4, overflow: "hidden" }}>
                           <div style={{
                             width: `${pct}%`, height: "100%",
-                            background: t.count > 0 ? `linear-gradient(90deg, ${t.color}CC, ${t.color})` : "transparent",
+                            background: t.count > 0 ? t.color : "transparent",
+                            opacity: t.count > 0 ? t.opacity : 1,
                             borderRadius: 4, transition: "width 0.5s ease",
                           }} />
                         </div>
-                        <span style={{ fontSize: 11, fontWeight: 700, color: t.count > 0 ? t.color : "#374151", fontFamily: "'JetBrains Mono', monospace", width: 26, textAlign: "right", flexShrink: 0 }}>
+                        <span style={{ fontSize: 11, fontWeight: 700, color: t.count > 0 ? t.color : "#374151", opacity: t.count > 0 ? t.opacity + 0.1 : 1, fontFamily: "'JetBrains Mono', monospace", width: 26, textAlign: "right", flexShrink: 0 }}>
                           {t.count}
                         </span>
                       </div>
