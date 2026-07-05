@@ -159,19 +159,24 @@ export default function DashboardPage({ groups = [], allUrls = [], allServers = 
   const top5Ram  = [...allServers].sort((a, b) => (b.ram  ?? 0) - (a.ram  ?? 0)).slice(0, 5);
   const top5Disk = [...allServers].sort((a, b) => (b.disk ?? 0) - (a.disk ?? 0)).slice(0, 5);
 
-  /* Distribution Disque par tranche */
-  const CPU_TRANCHES = [
+  /* Distributions CPU / RAM / Disque par tranche */
+  const TRANCHES = [
     { label: "0–25%",   min: 0,  max: 25,  color: "#6366F1" },
     { label: "25–50%",  min: 25, max: 50,  color: "#818CF8" },
     { label: "50–75%",  min: 50, max: 75,  color: "#FBBF24" },
     { label: "75–90%",  min: 75, max: 90,  color: "#FB923C" },
     { label: "90–100%", min: 90, max: 101, color: "#F87171" },
   ];
-  const cpuTranches = CPU_TRANCHES.map(t => ({
+  const makeTranches = (key) => TRANCHES.map(t => ({
     ...t,
-    count: allServers.filter(s => (s.disk ?? 0) >= t.min && (s.disk ?? 0) < t.max).length,
+    count: allServers.filter(s => (s[key] ?? 0) >= t.min && (s[key] ?? 0) < t.max).length,
   }));
-  const maxTranche = Math.max(...cpuTranches.map(t => t.count), 1);
+  const cpuTranches  = makeTranches("cpu");
+  const ramTranches  = makeTranches("ram");
+  const diskTranches = makeTranches("disk");
+  const maxCpu  = Math.max(...cpuTranches.map(t => t.count),  1);
+  const maxRam  = Math.max(...ramTranches.map(t => t.count),  1);
+  const maxDisk = Math.max(...diskTranches.map(t => t.count), 1);
 
   /* Groupes (non-global) */
   const groupStats = groups.filter(g => !g.isGlobal).map(g => ({
@@ -374,49 +379,49 @@ export default function DashboardPage({ groups = [], allUrls = [], allServers = 
         </div>
       )}
 
-      {/* ══ DISTRIBUTION CPU ════════════════════════════════════ */}
+      {/* ══ DISTRIBUTIONS CPU / RAM / DISQUE ════════════════════ */}
       {totalServers > 0 && (
         <div>
           <SectionTitle>
             <Layers size={12} style={{ marginRight: 2, flexShrink: 0 }} />
-            Distribution Disque par tranche
+            Distribution par tranche — CPU · RAM · Disque
           </SectionTitle>
-          <Panel style={{ padding: "18px 20px 14px" }}>
-            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-              {cpuTranches.map(t => {
-                const pct = (t.count / maxTranche) * 100;
-                return (
-                  <div key={t.label} style={{ display: "flex", alignItems: "center", gap: 14 }}>
-                    <span style={{ fontSize: 11, color: "#6B7280", width: 58, flexShrink: 0, fontFamily: "'JetBrains Mono', monospace" }}>
-                      {t.label}
-                    </span>
-                    <div style={{ flex: 1, height: 20, background: "rgba(255,255,255,0.04)", borderRadius: 5, overflow: "hidden", position: "relative" }}>
-                      <div style={{
-                        width: `${pct}%`,
-                        height: "100%",
-                        background: t.count > 0
-                          ? `linear-gradient(90deg, ${t.color}CC, ${t.color})`
-                          : "transparent",
-                        borderRadius: 5,
-                        transition: "width 0.5s ease",
-                      }} />
-                    </div>
-                    <span style={{
-                      fontSize: 12, fontWeight: 700,
-                      color: t.count > 0 ? t.color : "#374151",
-                      fontFamily: "'JetBrains Mono', monospace",
-                      width: 34, textAlign: "right", flexShrink: 0,
-                    }}>
-                      {t.count}
-                    </span>
-                  </div>
-                );
-              })}
-            </div>
-            <div style={{ textAlign: "center", fontSize: 10, color: "#4B5563", marginTop: 14 }}>
-              {totalServers} serveur{totalServers > 1 ? "s" : ""} au total
-            </div>
-          </Panel>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 14 }}>
+            {[
+              { label: "CPU",    tranches: cpuTranches,  maxVal: maxCpu,  accent: "#818CF8" },
+              { label: "RAM",    tranches: ramTranches,  maxVal: maxRam,  accent: "#F472B6" },
+              { label: "Disque", tranches: diskTranches, maxVal: maxDisk, accent: "#FBBF24" },
+            ].map(({ label, tranches, maxVal, accent }) => (
+              <Panel key={label} style={{ padding: "14px 16px 10px" }}>
+                <div style={{ fontSize: 11, fontWeight: 700, color: accent, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 10 }}>{label}</div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                  {tranches.map(t => {
+                    const pct = (t.count / maxVal) * 100;
+                    return (
+                      <div key={t.label} style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                        <span style={{ fontSize: 10, color: "#6B7280", width: 52, flexShrink: 0, fontFamily: "'JetBrains Mono', monospace" }}>
+                          {t.label}
+                        </span>
+                        <div style={{ flex: 1, height: 16, background: "rgba(255,255,255,0.04)", borderRadius: 4, overflow: "hidden" }}>
+                          <div style={{
+                            width: `${pct}%`, height: "100%",
+                            background: t.count > 0 ? `linear-gradient(90deg, ${t.color}CC, ${t.color})` : "transparent",
+                            borderRadius: 4, transition: "width 0.5s ease",
+                          }} />
+                        </div>
+                        <span style={{ fontSize: 11, fontWeight: 700, color: t.count > 0 ? t.color : "#374151", fontFamily: "'JetBrains Mono', monospace", width: 26, textAlign: "right", flexShrink: 0 }}>
+                          {t.count}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+                <div style={{ textAlign: "center", fontSize: 9, color: "#4B5563", marginTop: 10 }}>
+                  {totalServers} serveur{totalServers > 1 ? "s" : ""}
+                </div>
+              </Panel>
+            ))}
+          </div>
         </div>
       )}
 
