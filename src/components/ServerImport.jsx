@@ -1,7 +1,7 @@
 import { useRef, useState } from "react";
 import {
   FileSpreadsheet, Download, RotateCcw, CheckCircle,
-  X, Loader2, Plug, KeyRound, Eye, EyeOff,
+  X, Loader2, Plug, KeyRound, Eye, EyeOff, Search,
 } from "lucide-react";
 import * as XLSX from "xlsx";
 import { setServers, resetServers, getServersMeta } from "../utils/servers";
@@ -9,41 +9,146 @@ import { setServers, resetServers, getServersMeta } from "../utils/servers";
 const API_LS_KEY = "capacity-itcare-config";
 
 function loadApiConfig() {
-  try { return JSON.parse(localStorage.getItem(API_LS_KEY)) || { clientId: "", clientSecret: "" }; }
-  catch { return { clientId: "", clientSecret: "" }; }
+  try { return JSON.parse(localStorage.getItem(API_LS_KEY)) || { clientId: "", clientSecret: "", authMode: "credentials" }; }
+  catch { return { clientId: "", clientSecret: "", authMode: "credentials" }; }
 }
 
-/* ── Transform ressource ITCare → colonnes reconnues par normalizeServer ── */
-function itcareToRow(r) {
-  const path = String(r.path || r.resourcePath || r.resourceType || "");
+/* ── Helpers ── */
+function firstOf(...vals) { for (const v of vals) if (v != null && v !== "") return v; return null; }
 
-  /* OS : depuis champ explicite OU déduction depuis le path hiérarchique */
-  let type = r.os || r.osName || r.osType || r.operatingSystem || r.family || r.type || "";
-  if (!type) {
-    const m = path.match(/Instance\/([^/]+)(?:\/([^/]+))?/i);
-    type = m ? (m[2] || m[1]) : path.split("/").pop() || "";
+function mbToGb(v) { return v != null ? Math.round(v / 1024 * 10) / 10 : null; }
+
+/* ── Extraction du nom d'application depuis serviceName ──
+   Format ITCare : "FRANCE COMPETENCES - ETAPE - DEV"
+   → cloudName = "FRANCE COMPETENCES", appName = "ETAPE", environment = "DEV"
+── */
+function parseAppName(serviceName, cloudName, environment) {
+  if (!serviceName) return "";
+  const parts = serviceName.split(" - ").map(s => s.trim());
+  if (parts.length < 2) return serviceName;
+  const firstMatch = cloudName && parts[0].toUpperCase() === cloudName.trim().toUpperCase();
+  const lastMatch  = environment && parts[parts.length - 1].toUpperCase() === environment.trim().toUpperCase();
+  const middle = parts.slice(firstMatch ? 1 : 0, lastMatch ? -1 : undefined);
+  return middle.join(" - ") || serviceName;
+}
+
+/* ── Transform ressource ITCare → colonnes reconnues par normalizeServer ──
+   Champs confirmés par l'API (inspect) :
+   category | cloudId | cloudName | comment | creationTime | creationUser |
+   environment | family | id | internalResourceId | name | path | productName |
+   resourceType | serviceId | serviceName | status | supportLevel | supportPhase | type
+   + champs enrichis via GET /compute/resources/{id} : ip, cpu, ram, disk (si dispo)
+── */
+function itcareToRow(r) {
+  const path = String(r.path || "");
+
+  /* ── OS / Type ──
+     `family`      → famille OS ("Windows", "Linux"…)
+     `label`       → libellé lisible (disponible via endpoint détail)
+     `prettyLabel` → variante lisible
+     `path`        → ex. "/compute/instances/Windows/Server2022" */
+  let osType = String(r.family || "");
+  if (!osType) {
+    /* Déduction depuis le path */
+    const m = path.match(/(Windows|Linux|Ubuntu|Debian|RedHat|CentOS|Rocky|Alpine|VMware)/i);
+    osType = m ? m[1] : String(r.type || r.resourceType || "");
+  }
+  /* Libellé lisible pour l'affichage UI */
+  const displayLabel = String(r.prettyLabel || r.label || "");
+
+  /* ── Statut ── (ACTIVE = valeur réelle de l'API ITCare) */
+  const rawSt = String(r.status || "").toUpperCase();
+  const statut = ["RUNNING","ACTIVE","ON","STARTED","UP"].includes(rawSt)       ? "Running"
+    : ["STOPPED","OFF","INACTIVE","DOWN","HALTED"].includes(rawSt)               ? "Stopped"
+    : ["SUSPENDED","MAINTENANCE","IN_MAINTENANCE","PAUSED"].includes(rawSt)      ? "Maintenance"
+    : r.status || null;
+
+  /* ── IP ──
+     `ipAddress` confirmé dans la liste + `network` peut être objet ou string ── */
+  let ip = firstOf(r.ip, r.ipAddress, r.privateIp, r.mainIp, r.primaryIp);
+  if (!ip && Array.isArray(r.ipAddresses) && r.ipAddresses.length) {
+    const f = r.ipAddresses[0];
+    ip = typeof f === "string" ? f : firstOf(f.address, f.ip, f.value);
+  }
+  if (!ip && r.network) {
+    if (typeof r.network === "string") ip = r.network;
+    else ip = firstOf(r.network.ip, r.network.ipAddress, r.network.address, r.network.privateIp);
+  }
+  if (!ip && Array.isArray(r.networkInterfaces) && r.networkInterfaces.length) {
+    const ni = r.networkInterfaces[0];
+    ip = firstOf(ni.ip, ni.ipAddress);
   }
 
-  /* Statut : normaliser les valeurs ITCare en texte lisible */
-  const rawStatus = String(r.status || r.state || "");
-  const statut = rawStatus === "RUNNING" ? "Running"
-    : rawStatus === "STOPPED"  ? "Stopped"
-    : rawStatus === "SUSPENDED" ? "Maintenance"
-    : rawStatus || null;
+  /* ── CPU ──
+     `r.cpu` = nb vCPU confirmé (ex: 2) ── */
+  const cores  = firstOf(r.cpu, r.cpuCount, r.vcpuCount, r.vcpu, r.cores, r.nbCpu, r.numberOfCpu);
+  const cpuPct = firstOf(r.cpuUsage, r.cpuPercent, r.cpuLoad, r.cpuUtilization);
+
+  /* ── RAM (Go) ──
+     `r.ram` = Go confirmé (ex: 8) ── */
+  let ramGb = firstOf(r.ram, r.ramSize, r.memoryGb, r.ramGb, r.memoryGB, r.memorySizeGb, r.totalMemoryGb);
+  if (ramGb == null) {
+    const mb = firstOf(r.memoryMb, r.memoryMB, r.memory, r.totalMemory, r.memorySize, r.ramMb);
+    if (mb != null) ramGb = mb > 1000 ? mbToGb(mb) : mb;
+  }
+  const ramPct = firstOf(r.memoryUsage, r.ramUsage, r.memoryPercent, r.ramPercent);
+
+  /* ── Stockage (Go) ──
+     `r.storage` et `r.totalSizeDisks` confirmés dans la liste ── */
+  let diskGb = firstOf(r.storage, r.totalSizeDisks, r.disk, r.diskGb, r.storageGb, r.diskGB,
+                       r.diskSizeGb, r.totalDiskGb, r.totalStorageGb);
+  if (diskGb == null) {
+    const mb = firstOf(r.diskMb, r.storageMb);
+    if (mb != null) diskGb = mb > 1000 ? mbToGb(mb) : mb;
+  }
+  const diskPct = firstOf(r.diskUsage, r.storageUsage, r.diskPercent);
+
+  /* ── Application / badge ──
+     Format `serviceName` : "FRANCE COMPETENCES - ETAPE - DEV"
+     → on retire le préfixe cloudName et le suffixe environment ── */
+  const service = parseAppName(r.serviceName, r.cloudName, r.environment);
+
+  /* Datacenter / zone */
+  const datacenter = firstOf(r.labelDataCenter, r.labelRegion, r.labelAvailabilityZone, r.labelArea) || "";
+
+  /* NOTE : ne pas inclure CPU/RAM%/Stockage% à null :
+     - "RAM%" → flat key "ram" (collision avec RAM → écrase la valeur GB !)
+     - "Stockage%" → flat key "stockage" (même collision)
+     - CPU null → fallback 30% dans normalizeServer → affichage trompeur
+     Aucune métrique d'usage n'est disponible via l'API ITCare. */
+  /* ── Backup ── */
+  const backupStatus = String(r.backupStatus != null ? (r.backupStatus ? "Oui" : "Non") : "");
+  const backupPolicy = r.backupPolicyDetails?.backups?.length
+    ? r.backupPolicyDetails.backups.map(b => b.type || "").filter(Boolean).join(", ")
+    : "";
 
   return {
-    Name:          r.name || r.hostname || r.displayName || String(r.id || ""),
-    Type:          type || "Unknown",
-    Statut:        statut,
-    CPU:           r.cpuUsage   ?? r.cpuPercent  ?? r.cpu  ?? null,
-    RAM:           r.memoryGb   ?? r.ramGb       ?? r.memoryGB ?? r.memoryInGb ?? null,
-    Stockage:      r.diskGb     ?? r.storageGb   ?? r.diskGB   ?? r.storageInGb ?? null,
-    IP:            r.ip || r.ipAddress || r.privateIp || r.privateIpAddress || "",
-    Service:       r.applicationName || r.application || r.service || r.serviceName || "",
-    Environnement: r.environment || r.env || r.environmentName || "",
-    creationTime:  r.createdAt || r.creationDate || r.creationTime || "",
-    "Path ITCare": path,
-    "ID ITCare":   String(r.id || ""),
+    Name:            r.name || String(r.id || ""),
+    Type:            displayLabel || osType || "Unknown",  /* prettyLabel > family */
+    Statut:          statut,
+    Cores:           cores != null ? String(cores) : null, /* "cores" → coresVal  (vCPU) */
+    RAM:             ramGb,                                /* "ram"   → ramGbVal  (Go)   */
+    Stockage:        diskGb,                               /* "stockage" → diskGbVal (Go) */
+    IP:              ip || "",
+    Service:         service,                              /* app parsé de serviceName */
+    Environnement:   String(r.environment || ""),
+    Datacenter:      datacenter,
+    /* --- colonnes extra (visibles dans le détail du serveur) --- */
+    "OS Family":     osType,
+    "Resource Type": String(r.resourceType || r.type || ""),
+    Category:        String(r.category || ""),
+    Cloud:           String(r.cloudName || ""),
+    "Product":       String(r.productName || ""),
+    Support:         [r.supportLevel, r.supportPhase].filter(Boolean).join(" / "),
+    "Service Full":  String(r.serviceName || ""),
+    "ServiceKey":    String(r.serviceKey || ""),
+    "Total Disques": r.totalSizeDisks != null ? String(r.totalSizeDisks) : "",
+    "Réplication":   String(r.replicationStatus || ""),
+    "Backup":        backupStatus,
+    "Backup Policy": backupPolicy,
+    creationTime:    r.creationTime || "",
+    "ITCare Path":   path,
+    "ITCare ID":     String(r.id || ""),
   };
 }
 
@@ -62,7 +167,9 @@ export default function ServerImport() {
   const [api, setApi] = useState(loadApiConfig);
   const [loading, setLoading] = useState(false);
   const [showSecret, setShowSecret] = useState(false);
+  const [userToken, setUserToken] = useState("");
   const [confirmReset, setConfirmReset] = useState(false);
+  const [inspect, setInspect] = useState(null);   /* { allKeys, sample } */
   const meta = getServersMeta();
 
   const flash = (m) => { setMsg(m); setTimeout(() => setMsg(null), 5000); };
@@ -92,19 +199,58 @@ export default function ServerImport() {
     XLSX.writeFile(wb, "template-serveurs.xlsx");
   };
 
-  /* ── Chargement ITCare ── */
-  const fetchItcare = async () => {
-    const clientId     = api.clientId.trim();
-    const clientSecret = api.clientSecret.trim();
-    if (!clientId || !clientSecret)
-      return flash({ ok: false, text: "Renseignez le Client ID et le Client Secret ITCare" });
+  /* ── Inspection des champs bruts ITCare ── */
+  const inspectItcare = async () => {
+    const isTokenMode = api.authMode === "token";
+    let body;
+    if (isTokenMode) {
+      const tok = userToken.trim().replace(/^Bearer\s+/i, "");
+      if (!tok) return flash({ ok: false, text: "Collez votre token de session ITCare" });
+      body = { token: tok };
+    } else {
+      const clientId = api.clientId.trim(), clientSecret = api.clientSecret.trim();
+      if (!clientId || !clientSecret) return flash({ ok: false, text: "Renseignez les identifiants ITCare" });
+      body = { clientId, clientSecret };
+    }
     setLoading(true);
     try {
-      localStorage.setItem(API_LS_KEY, JSON.stringify({ clientId, clientSecret }));
+      const res = await fetch("/api/itcare-inspect", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || `HTTP ${res.status}`);
+      setInspect(json);
+    } catch (err) {
+      flash({ ok: false, text: `Inspection échouée : ${err.message}` });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  /* ── Chargement ITCare ── */
+  const fetchItcare = async () => {
+    const isTokenMode = api.authMode === "token";
+    let body;
+    if (isTokenMode) {
+      const tok = userToken.trim().replace(/^Bearer\s+/i, "");
+      if (!tok) return flash({ ok: false, text: "Collez votre token de session ITCare" });
+      body = { token: tok };
+    } else {
+      const clientId     = api.clientId.trim();
+      const clientSecret = api.clientSecret.trim();
+      if (!clientId || !clientSecret)
+        return flash({ ok: false, text: "Renseignez le Client ID et le Client Secret ITCare" });
+      localStorage.setItem(API_LS_KEY, JSON.stringify({ clientId, clientSecret, authMode: "credentials" }));
+      body = { clientId, clientSecret };
+    }
+    setLoading(true);
+    try {
       const res = await fetch("/api/itcare", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ clientId, clientSecret }),
+        body: JSON.stringify(body),
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || `HTTP ${res.status}`);
@@ -146,7 +292,7 @@ export default function ServerImport() {
         <button style={btn("#34D399")} onClick={() => fileRef.current?.click()} title="Importer un inventaire serveurs (.xlsx)">
           <FileSpreadsheet size={13} /> Importer Excel
         </button>
-        <button style={btn("#818CF8")} onClick={() => setShowApi(v => !v)} title="Charger depuis l'API ITCare">
+        <button style={btn("#818CF8")} onClick={() => { setShowApi(v => !v); setInspect(null); }} title="Charger depuis l'API ITCare">
           <Plug size={13} /> ITCare
         </button>
         <button style={btn("#6B7280")} onClick={downloadTemplate} title="Télécharger le modèle Excel">
@@ -171,54 +317,187 @@ export default function ServerImport() {
         <div style={{
           display: "flex", flexDirection: "column", gap: 8,
           background: "rgba(255,255,255,0.03)", border: "1px solid rgba(99,102,241,0.25)",
-          borderRadius: 10, padding: "12px 14px", animation: "fadeIn 0.2s ease", minWidth: 340,
+          borderRadius: 10, padding: "12px 14px", animation: "fadeIn 0.2s ease", minWidth: 360,
         }}>
           <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 2 }}>
             <KeyRound size={13} color="#818CF8" />
             <span style={{ fontSize: 11, fontWeight: 700, color: "#818CF8", letterSpacing: "0.04em" }}>Connexion ITCare</span>
-            <span style={{ fontSize: 10, color: "#4B5563", marginLeft: 4 }}>accounts.cegedim.cloud (OAuth2)</span>
           </div>
-          <input
-            value={api.clientId}
-            onChange={e => setApi(a => ({ ...a, clientId: e.target.value }))}
-            onKeyDown={e => e.key === "Enter" && fetchItcare()}
-            placeholder="Client ID"
-            autoComplete="username"
-            style={{
-              background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)",
-              borderRadius: 7, color: "#E5E7EB", fontSize: 11, padding: "7px 10px",
-              fontFamily: "'JetBrains Mono', monospace", outline: "none", width: "100%", boxSizing: "border-box",
-            }}
-          />
-          <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-            <input
-              value={api.clientSecret}
-              onChange={e => setApi(a => ({ ...a, clientSecret: e.target.value }))}
-              onKeyDown={e => e.key === "Enter" && fetchItcare()}
-              placeholder="Client Secret"
-              type={showSecret ? "text" : "password"}
-              autoComplete="current-password"
-              style={{
-                flex: 1, background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)",
-                borderRadius: 7, color: "#E5E7EB", fontSize: 11, padding: "7px 10px",
-                fontFamily: "'JetBrains Mono', monospace", outline: "none",
-              }}
-            />
-            <button
-              onClick={() => setShowSecret(v => !v)}
-              style={{ background: "none", border: "none", color: "#6B7280", cursor: "pointer", display: "flex", padding: 4 }}
-              title={showSecret ? "Masquer" : "Afficher"}
-            >
-              {showSecret ? <EyeOff size={14} /> : <Eye size={14} />}
-            </button>
+
+          {/* Toggle mode */}
+          <div style={{ display: "flex", gap: 4, background: "rgba(255,255,255,0.04)", borderRadius: 7, padding: 3 }}>
+            {[["credentials", "Client ID / Secret"], ["token", "Token de session"]].map(([mode, label]) => (
+              <button
+                key={mode}
+                onClick={() => setApi(a => ({ ...a, authMode: mode }))}
+                style={{
+                  flex: 1, padding: "5px 0", borderRadius: 5, fontSize: 10, fontWeight: 600, cursor: "pointer",
+                  border: "none", transition: "background 0.15s, color 0.15s",
+                  background: api.authMode === mode ? "rgba(129,140,248,0.25)" : "transparent",
+                  color: api.authMode === mode ? "#818CF8" : "#6B7280",
+                }}
+              >{label}</button>
+            ))}
           </div>
+
+          {api.authMode === "credentials" ? (
+            <>
+              <span style={{ fontSize: 10, color: "#4B5563" }}>accounts.cegedim.cloud — OAuth2 client_credentials</span>
+              <input
+                value={api.clientId}
+                onChange={e => setApi(a => ({ ...a, clientId: e.target.value }))}
+                onKeyDown={e => e.key === "Enter" && fetchItcare()}
+                placeholder="Client ID"
+                autoComplete="username"
+                style={{
+                  background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)",
+                  borderRadius: 7, color: "#E5E7EB", fontSize: 11, padding: "7px 10px",
+                  fontFamily: "'JetBrains Mono', monospace", outline: "none", width: "100%", boxSizing: "border-box",
+                }}
+              />
+              <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                <input
+                  value={api.clientSecret}
+                  onChange={e => setApi(a => ({ ...a, clientSecret: e.target.value }))}
+                  onKeyDown={e => e.key === "Enter" && fetchItcare()}
+                  placeholder="Client Secret"
+                  type={showSecret ? "text" : "password"}
+                  autoComplete="current-password"
+                  style={{
+                    flex: 1, background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)",
+                    borderRadius: 7, color: "#E5E7EB", fontSize: 11, padding: "7px 10px",
+                    fontFamily: "'JetBrains Mono', monospace", outline: "none",
+                  }}
+                />
+                <button
+                  onClick={() => setShowSecret(v => !v)}
+                  style={{ background: "none", border: "none", color: "#6B7280", cursor: "pointer", display: "flex", padding: 4 }}
+                  title={showSecret ? "Masquer" : "Afficher"}
+                >
+                  {showSecret ? <EyeOff size={14} /> : <Eye size={14} />}
+                </button>
+              </div>
+            </>
+          ) : (
+            <>
+              <span style={{ fontSize: 10, color: "#4B5563" }}>
+                Collez le Bearer token copié depuis l'onglet Réseau (DevTools) sur ITCare
+              </span>
+              <textarea
+                value={userToken}
+                onChange={e => setUserToken(e.target.value)}
+                placeholder="eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9…"
+                rows={4}
+                style={{
+                  background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)",
+                  borderRadius: 7, color: "#E5E7EB", fontSize: 10, padding: "7px 10px",
+                  fontFamily: "'JetBrains Mono', monospace", outline: "none",
+                  width: "100%", boxSizing: "border-box", resize: "vertical",
+                }}
+              />
+              <span style={{ fontSize: 10, color: "#6B7280" }}>
+                Le préfixe <code style={{ color: "#818CF8" }}>Bearer </code> est accepté, il sera retiré automatiquement.
+              </span>
+            </>
+          )}
+
           <div style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
             <button style={{ ...btn("#6B7280"), fontSize: 11 }} onClick={() => setShowApi(false)}>Annuler</button>
+            <button style={{ ...btn("#F59E0B"), opacity: loading ? 0.6 : 1, fontSize: 11 }} onClick={inspectItcare} disabled={loading} title="Inspecter les champs disponibles dans l'API ITCare">
+              {loading ? <Loader2 size={13} style={{ animation: "spin 1s linear infinite" }} /> : <Search size={13} />}
+              {loading ? "Chargement…" : "Inspecter"}
+            </button>
             <button style={{ ...btn("#818CF8"), opacity: loading ? 0.6 : 1, fontSize: 11 }} onClick={fetchItcare} disabled={loading}>
               {loading ? <Loader2 size={13} style={{ animation: "spin 1s linear infinite" }} /> : <Plug size={13} />}
               {loading ? "Connexion…" : "Charger les serveurs"}
             </button>
           </div>
+        </div>
+      )}
+
+      {/* Panneau d'inspection des champs bruts */}
+      {inspect && (
+        <div style={{
+          display: "flex", flexDirection: "column", gap: 8,
+          background: "rgba(245,158,11,0.04)", border: "1px solid rgba(245,158,11,0.25)",
+          borderRadius: 10, padding: "12px 14px", animation: "fadeIn 0.2s ease", maxWidth: 620,
+        }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+            <span style={{ fontSize: 11, fontWeight: 700, color: "#F59E0B" }}>
+              Champs API ITCare — liste ({inspect.total} ressources)
+            </span>
+            <button onClick={() => setInspect(null)} style={{ background: "none", border: "none", color: "#6B7280", cursor: "pointer", display: "flex" }}><X size={12} /></button>
+          </div>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: "4px 6px" }}>
+            {inspect.allKeys.map(k => (
+              <span key={k} style={{
+                fontSize: 10, padding: "2px 7px", borderRadius: 4,
+                background: "rgba(245,158,11,0.12)", border: "1px solid rgba(245,158,11,0.2)", color: "#D97706",
+                fontFamily: "'JetBrains Mono', monospace",
+              }}>{k}</span>
+            ))}
+          </div>
+
+          {/* Résultat du endpoint détail */}
+          {inspect.detailEndpoint && (
+            <div style={{ borderTop: "1px solid rgba(245,158,11,0.15)", paddingTop: 8 }}>
+              <span style={{ fontSize: 10, fontWeight: 700, color: inspect.detailEndpoint.available ? "#34D399" : "#F87171" }}>
+                GET /compute/resources/&#123;id&#125; : {inspect.detailEndpoint.available ? "disponible" : "non disponible"}
+              </span>
+              {inspect.detailEndpoint.available && inspect.detailEndpoint.usefulKeys?.length > 0 && (
+                <>
+                  <div style={{ fontSize: 10, color: "#6B7280", marginTop: 4 }}>
+                    Champs supplémentaires utiles (IP / CPU / RAM / Disque) :
+                  </div>
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: "4px 6px", marginTop: 4 }}>
+                    {inspect.detailEndpoint.usefulKeys.map(k => (
+                      <span key={k} style={{
+                        fontSize: 10, padding: "2px 7px", borderRadius: 4,
+                        background: "rgba(52,211,153,0.12)", border: "1px solid rgba(52,211,153,0.2)", color: "#34D399",
+                        fontFamily: "'JetBrains Mono', monospace",
+                      }}>{k}</span>
+                    ))}
+                  </div>
+                </>
+              )}
+              {inspect.detailEndpoint.available && inspect.detailEndpoint.usefulKeys?.length === 0 && (
+                <div style={{ fontSize: 10, color: "#9CA3AF", marginTop: 4 }}>
+                  Aucun champ IP/CPU/RAM supplémentaire — ces données ne sont pas disponibles via ce endpoint.
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Résumé des champs clés avec valeurs réelles */}
+          {inspect.fieldValues && Object.keys(inspect.fieldValues).length > 0 && (
+            <div style={{ borderTop: "1px solid rgba(245,158,11,0.15)", paddingTop: 8 }}>
+              <div style={{ fontSize: 10, fontWeight: 700, color: "#F59E0B", marginBottom: 4 }}>
+                Champs avec valeurs réelles (sur {inspect.total} serveurs) :
+              </div>
+              {Object.entries(inspect.fieldValues).map(([k, v]) => (
+                <div key={k} style={{ fontSize: 10, color: "#D1D5DB", marginBottom: 2 }}>
+                  <span style={{ color: "#34D399", fontFamily: "'JetBrains Mono', monospace" }}>{k}</span>
+                  {" "}→ {v.count} serveur(s), ex : <span style={{ color: "#F59E0B" }}>{JSON.stringify(v.example)}</span>
+                </div>
+              ))}
+            </div>
+          )}
+          {inspect.fieldValues && Object.keys(inspect.fieldValues).length === 0 && (
+            <div style={{ fontSize: 10, color: "#9CA3AF", borderTop: "1px solid rgba(245,158,11,0.15)", paddingTop: 8 }}>
+              Aucune valeur trouvée pour cpu / ram / disk / ipAddress / network / labelArea sur les {inspect.total} serveurs.
+            </div>
+          )}
+
+          <details style={{ fontSize: 10, color: "#9CA3AF" }}>
+            <summary style={{ cursor: "pointer", color: "#F59E0B", fontWeight: 600, fontSize: 10 }}>1er objet brut — liste (cliquer)</summary>
+            <pre style={{ marginTop: 6, background: "rgba(0,0,0,0.3)", padding: "8px 10px", borderRadius: 6, overflowX: "auto", fontSize: 10, color: "#D1D5DB", maxHeight: 250, overflowY: "auto" }}>{JSON.stringify(inspect.sample?.[0], null, 2)}</pre>
+          </details>
+          {inspect.richSample && inspect.richSample !== inspect.sample?.[0] && (
+            <details style={{ fontSize: 10, color: "#9CA3AF" }}>
+              <summary style={{ cursor: "pointer", color: "#34D399", fontWeight: 600, fontSize: 10 }}>Serveur avec cpu/ip/réseau renseigné (cliquer)</summary>
+              <pre style={{ marginTop: 6, background: "rgba(0,0,0,0.3)", padding: "8px 10px", borderRadius: 6, overflowX: "auto", fontSize: 10, color: "#D1D5DB", maxHeight: 300, overflowY: "auto" }}>{JSON.stringify(inspect.richSample, null, 2)}</pre>
+            </details>
+          )}
         </div>
       )}
 

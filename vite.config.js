@@ -250,17 +250,46 @@ function itcarePlugin() {
     return access_token;
   }
 
-  async function fetchAllResources(token) {
+  /* Patterns qui identifient une ressource de type Instance / VM */
+  function isInstance(r) {
+    const rt   = String(r.resourceType || '').toUpperCase();
+    const cat  = String(r.category     || '').toUpperCase();
+    const fam  = String(r.family       || '').toUpperCase();
+    const path = String(r.path         || '').toLowerCase();
+    const lbl  = String(r.label        || r.prettyLabel || '').toUpperCase();
+
+    /* Exclusions explicites (LB, FW, storage, réseau…) */
+    const exclude = ['LOAD_BALANCER','FIREWALL','SWITCH','ROUTER','STORAGE',
+      'NAS','SAN','CONTAINER','KUBERNETES','DATABASE','CDN','DNS'];
+    if (exclude.some(x => rt.includes(x) || cat.includes(x) || fam.includes(x))) return false;
+
+    /* Inclusions positives */
+    const include = ['INSTANCE','VIRTUAL_MACHINE','VM','SERVER','PHYSIC'];
+    if (include.some(x => rt.includes(x) || cat.includes(x) || fam.includes(x))) return true;
+
+    /* Déduction par le chemin (ex. /compute/instances/…) */
+    if (path.startsWith('/compute') || path.includes('/instance') || path.includes('/vm')) return true;
+
+    /* Déduction par le label */
+    if (lbl.includes('INSTANCE') || lbl.includes('VIRTUAL') || lbl.includes('SERVER')) return true;
+
+    return false;
+  }
+
+  async function fetchAllPages(token, endpoint) {
     const all = [];
     let page = 0;
     const size = 200;
     while (true) {
-      const r = await fetch(`${API_BASE}/compute/resources?page=${page}&size=${size}`, {
+      const u = new URL(endpoint);
+      u.searchParams.set('page', page);
+      u.searchParams.set('size', size);
+      const r = await fetch(u.toString(), {
         headers: { 'Authorization': `Bearer ${token}` },
       });
       if (!r.ok) {
         const txt = await r.text().catch(() => '');
-        throw new Error(`ITCare /compute/resources (${r.status}) — ${txt.slice(0, 200)}`);
+        throw new Error(`${endpoint} (${r.status}) — ${txt.slice(0, 200)}`);
       }
       const data = await r.json();
       const items = Array.isArray(data) ? data
@@ -273,9 +302,117 @@ function itcarePlugin() {
     return all;
   }
 
+  async function fetchAllResources(token) {
+    /* 1. Essayer le endpoint dédié /compute/instances */
+    try {
+      const probe = await fetch(`${API_BASE}/compute/instances?page=0&size=1`, {
+        headers: { 'Authorization': `Bearer ${token}` },
+        signal: AbortSignal.timeout(6000),
+      });
+      if (probe.ok) {
+        console.log('\x1b[36m[ITCare]\x1b[0m Endpoint /compute/instances disponible — utilisation.');
+        return fetchAllPages(token, `${API_BASE}/compute/instances`);
+      }
+    } catch {}
+
+    /* 2. Fallback : /compute/resources avec filtre côté serveur si supporté */
+    let filtered = [];
+    try {
+      const probe = await fetch(`${API_BASE}/compute/resources?resourceType=INSTANCE&page=0&size=1`, {
+        headers: { 'Authorization': `Bearer ${token}` },
+        signal: AbortSignal.timeout(6000),
+      });
+      if (probe.ok) {
+        const d = await probe.json();
+        const items = Array.isArray(d) ? d : d.content || d.items || d.data || [];
+        /* Vérifier que le filtre a bien réduit les résultats */
+        if (items.length > 0 && items.every(r => isInstance(r))) {
+          console.log('\x1b[36m[ITCare]\x1b[0m Filtre resourceType=INSTANCE accepté par l\'API.');
+          return fetchAllPages(token, `${API_BASE}/compute/resources?resourceType=INSTANCE`);
+        }
+      }
+    } catch {}
+
+    /* 3. Dernier recours : tout récupérer et filtrer côté proxy */
+    console.log('\x1b[36m[ITCare]\x1b[0m Filtre local : chargement de toutes les ressources puis filtre Instances…');
+    const all = await fetchAllPages(token, `${API_BASE}/compute/resources`);
+    filtered = all.filter(isInstance);
+    console.log(`\x1b[36m[ITCare]\x1b[0m ${all.length} ressources totales → ${filtered.length} instances conservées.`);
+    return filtered;
+  }
+
+  /* Champs "utiles" déjà présents dans la liste : on ne re-fetche que s'il en manque */
+  const LIST_FIELDS = new Set([
+    'id','name','path','status','environment','serviceName','serviceId',
+    'category','cloudId','cloudName','productName','resourceType',
+    'supportLevel','supportPhase','type','family','internalResourceId',
+    'creationTime','creationUser','comment',
+  ]);
+
+  const DETAIL_FIELDS_WANTED = ['ip','ipAddress','ipAddresses','networkInterfaces',
+    'cpuCount','vcpuCount','vcpu','cores','nbCpu',
+    'cpuUsage','cpuPercent','memoryGb','memoryMb','memory','ramGb',
+    'diskGb','diskMb','storageGb','applications','relatedApplications'];
+
+  /* Sonde GET /compute/resources/{id} sur le 1er item pour détecter les champs supplémentaires */
+  async function probeDetailEndpoint(token, id) {
+    try {
+      const r = await fetch(`${API_BASE}/compute/resources/${id}`, {
+        headers: { 'Authorization': `Bearer ${token}` },
+        signal: AbortSignal.timeout(6000),
+      });
+      if (!r.ok) return null;
+      const data = await r.json();
+      const extraKeys = Object.keys(data).filter(k => !LIST_FIELDS.has(k));
+      const usefulKeys = extraKeys.filter(k => DETAIL_FIELDS_WANTED.includes(k));
+      console.log('\x1b[36m[ITCare]\x1b[0m GET /compute/resources/{id} — champs supplémentaires :', extraKeys.join(' | ') || '(aucun)');
+      console.log('\x1b[36m[ITCare]\x1b[0m Champs utiles trouvés :', usefulKeys.join(' | ') || '(aucun — IP/CPU/RAM non disponibles via ce endpoint)');
+      return { extraKeys, usefulKeys, sample: data };
+    } catch (e) {
+      console.log('\x1b[33m[ITCare]\x1b[0m Endpoint détail indisponible :', e.message);
+      return null;
+    }
+  }
+
+  /* Enrichit chaque ressource avec les données du endpoint détail (batch de 10) */
+  async function enrichWithDetails(resources, token) {
+    if (resources.length === 0) return resources;
+
+    const probe = await probeDetailEndpoint(token, resources[0].id);
+    if (!probe || probe.usefulKeys.length === 0) return resources;  /* Rien de nouveau */
+
+    console.log(`\x1b[36m[ITCare]\x1b[0m Enrichissement de ${resources.length} ressources (batch 10)…`);
+    const BATCH = 10;
+    const result = [...resources];
+    for (let i = 0; i < result.length; i += BATCH) {
+      await Promise.all(result.slice(i, i + BATCH).map(async (r, bi) => {
+        try {
+          const res = await fetch(`${API_BASE}/compute/resources/${r.id}`, {
+            headers: { 'Authorization': `Bearer ${token}` },
+            signal: AbortSignal.timeout(8000),
+          });
+          if (res.ok) result[i + bi] = { ...r, ...(await res.json()) };
+        } catch {}
+      }));
+    }
+    console.log('\x1b[36m[ITCare]\x1b[0m Enrichissement terminé.');
+    return result;
+  }
+
+  function parseAuthToken(bodyObj) {
+    const { clientId, clientSecret, token: userToken } = bodyObj;
+    if (userToken && userToken.trim())
+      return { mode: 'token', value: userToken.trim().replace(/^Bearer\s+/i, '') };
+    if (clientId && clientSecret)
+      return { mode: 'credentials', clientId, clientSecret };
+    return null;
+  }
+
   return {
     name: 'itcare-middleware',
     configureServer(server) {
+
+      /* ── /api/itcare : chargement complet ── */
       server.middlewares.use('/api/itcare', (req, res) => {
         res.setHeader('Content-Type', 'application/json');
         res.setHeader('Access-Control-Allow-Origin', '*');
@@ -287,19 +424,84 @@ function itcarePlugin() {
         req.on('data', d => { body += d; });
         req.on('end', async () => {
           try {
-            const { clientId, clientSecret } = JSON.parse(body || '{}');
-            if (!clientId || !clientSecret)
-              return res.end(JSON.stringify({ error: 'clientId et clientSecret sont requis' }));
-            const token     = await getToken(clientId, clientSecret);
-            const resources = await fetchAllResources(token);
-            res.end(JSON.stringify({ servers: resources, total: resources.length }));
+            const parsed = parseAuthToken(JSON.parse(body || '{}'));
+            if (!parsed) return res.end(JSON.stringify({ error: 'Fournissez soit un token de session, soit le clientId et clientSecret' }));
+            const token = parsed.mode === 'token' ? parsed.value : await getToken(parsed.clientId, parsed.clientSecret);
+            let resources = await fetchAllResources(token);
+
+            /* Log dimensionnement dans le terminal Vite */
+            if (resources.length > 0) {
+              const sample = resources.find(r => r.cpu != null) || resources[0];
+              console.log('\x1b[36m[ITCare]\x1b[0m', resources.length, 'instances chargées');
+              console.log('\x1b[36m[ITCare]\x1b[0m Dimensionnement (1er serveur avec données) :');
+              console.log(`\x1b[36m[ITCare]\x1b[0m  cpu=${sample.cpu} | ram=${sample.ram} | storage=${sample.storage} | totalSizeDisks=${sample.totalSizeDisks} | ipAddress=${sample.ipAddress}`);
+              console.log(`\x1b[36m[ITCare]\x1b[0m  name=${sample.name} | env=${sample.environment} | serviceName=${sample.serviceName}`);
+            }
+
+            resources = await enrichWithDetails(resources, token);
+            res.end(JSON.stringify({
+              servers: resources,
+              total: resources.length,
+              _sample: resources.slice(0, 2),   /* 2 premiers items bruts pour debug navigateur */
+            }));
           } catch (e) {
-            _tokenCache = null; // reset sur erreur
+            _tokenCache = null;
             res.statusCode = 500;
             res.end(JSON.stringify({ error: e.message }));
           }
         });
       });
+
+      /* ── /api/itcare-inspect : retourne les items bruts sans transformation ── */
+      server.middlewares.use('/api/itcare-inspect', (req, res) => {
+        res.setHeader('Content-Type', 'application/json');
+        res.setHeader('Access-Control-Allow-Origin', '*');
+        res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+        if (req.method === 'OPTIONS') { res.statusCode = 204; return res.end(); }
+        if (req.method !== 'POST')    { res.statusCode = 405; return res.end(JSON.stringify({ error: 'POST requis' })); }
+
+        let body = '';
+        req.on('data', d => { body += d; });
+        req.on('end', async () => {
+          try {
+            const parsed = parseAuthToken(JSON.parse(body || '{}'));
+            if (!parsed) return res.end(JSON.stringify({ error: 'Auth manquante' }));
+            const token = parsed.mode === 'token' ? parsed.value : await getToken(parsed.clientId, parsed.clientSecret);
+            const resources = await fetchAllResources(token);
+            /* Tous les champs de la liste */
+            const allKeys = [...new Set(resources.flatMap(r => Object.keys(r)))].sort();
+            /* Sonde le endpoint détail sur le 1er item */
+            const detail = resources.length > 0 ? await probeDetailEndpoint(token, resources[0].id) : null;
+            /* Trouve un item qui a cpu ET/OU ipAddress pour montrer des valeurs réelles */
+            const richSample = resources.find(r => r.cpu != null || r.ipAddress || r.ram != null || r.network) || resources[0];
+            /* Résumé des valeurs réelles pour les champs clés */
+            const fieldValues = {};
+            const keyFields = ['cpu','ram','storage','totalSizeDisks','disk','ipAddress','network','labelArea','labelDataCenter','labelRegion'];
+            for (const k of keyFields) {
+              const vals = resources.map(r => r[k]).filter(v => v != null && v !== '');
+              if (vals.length > 0) fieldValues[k] = { count: vals.length, example: vals[0] };
+            }
+            res.end(JSON.stringify({
+              total: resources.length,
+              allKeys,
+              sample: resources.slice(0, 3),
+              richSample,
+              fieldValues,
+              detailEndpoint: detail ? {
+                available: true,
+                extraKeys: detail.extraKeys,
+                usefulKeys: detail.usefulKeys,
+                sample: detail.sample,
+              } : { available: false },
+            }));
+          } catch (e) {
+            _tokenCache = null;
+            res.statusCode = 500;
+            res.end(JSON.stringify({ error: e.message }));
+          }
+        });
+      });
+
     },
   };
 }
