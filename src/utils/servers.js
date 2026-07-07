@@ -334,7 +334,8 @@ function loadPersisted() {
     if (!Array.isArray(rows) || rows.length === 0) return null;
     _meta = parsed.meta || { source: "excel", loadedAt: null, label: null };
     /* Re-normalisation + fallback métriques depuis snapshot (évite les défauts 30/40/35) */
-    return applyMetricsFallback(rows, _meta.source).map((s, i) => normalizeServer(s, i));
+    const normalized = applyMetricsFallback(rows, _meta.source).map((s, i) => normalizeServer(s, i));
+    return dedupeByName(normalized); /* élimine doublons persistés avant de peupler le cache */
   } catch { return null; }
 }
 
@@ -347,11 +348,7 @@ function dedupeByName(list) {
 
 export function getServers() {
   if (!_cache) _cache = loadPersisted() || SERVER_DEFS.map(genServer);
-  /* Filet de sécurité : éliminer les doublons avant tout affichage */
-  if (_cache.length !== new Set(_cache.map(s => s.name?.toLowerCase().trim())).size) {
-    _cache = dedupeByName(_cache);
-  }
-  return _cache;
+  return _cache; /* Pur — la déduplication est garantie en amont (loadPersisted + patchServerMetrics) */
 }
 
 export function getServersMeta() { return _meta; }
@@ -447,16 +444,17 @@ export function patchServerMetrics(name, metrics) {
     ...(metrics.diskGb != null ? { diskGb: Math.round(metrics.diskGb * 10) / 10 } : {}),
   };
 
-  const idx = _cache.findIndex(s => s.name.toLowerCase() === name.toLowerCase());
+  const nameKey = name.trim().toLowerCase();
+  const idx = _cache.findIndex(s => s.name.toLowerCase() === nameKey);
   if (idx >= 0) {
     const growthRate = _cache[idx].growthRate || defGrow;
     const { history24h, monthly } = buildSeries(base, growthRate, strSeed(name));
     _cache = _cache.map((s, i) => i !== idx ? s : { ...s, ...patch, history24h, monthly });
   } else {
     const { history24h, monthly } = buildSeries(base, defGrow, strSeed(name));
-    _cache = [..._cache, {
+    _cache = dedupeByName([..._cache, {
       id:         `vps-${metrics.hostname || name}`,
-      name,
+      name:       name.trim(), /* trim pour que le findIndex fonctionne sur les appels suivants */
       role,
       env:        metrics.env  || "Production",
       app:        metrics.app  || "",
@@ -466,7 +464,7 @@ export function patchServerMetrics(name, metrics) {
       history24h,
       monthly,
       ...patch,
-    }];
+    }]);
   }
 
   /* Snapshot throttlé — max 1 par 6 h par serveur (pour buildTrendChartData) */
@@ -481,10 +479,10 @@ export function patchServerMetrics(name, metrics) {
   try {
     const existing = JSON.parse(localStorage.getItem(LS_KEY) || "{}");
     const rawRows  = Array.isArray(existing.rows) ? existing.rows : _cache;
-    const updated  = _cache.map(s => {
-      const orig = rawRows.find(r => (r.name || r.nom || r.serveur || "").toLowerCase() === s.name.toLowerCase());
+    const updated  = dedupeByName(_cache.map(s => {
+      const orig = rawRows.find(r => (r.name || r.nom || r.serveur || r.Name || "").toLowerCase().trim() === s.name.toLowerCase().trim());
       return orig ? { ...orig, cpu: s.cpu, ram: s.ram, disk: s.disk, os: s.os, ip: s.ip, uptimeDays: s.uptimeDays, lastVpsCheck: s.lastVpsCheck, ramGb: s.ramGb, diskGb: s.diskGb, source: s.source } : s;
-    });
+    }));
     localStorage.setItem(LS_KEY, JSON.stringify({ meta: _meta, rows: updated }));
   } catch {}
   _listeners.forEach(fn => fn());
