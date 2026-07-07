@@ -1,6 +1,6 @@
 import { useState, useRef } from "react";
 import {
-  ChevronLeft, ChevronRight, Plus, Folder, FolderOpen,
+  ChevronLeft, ChevronRight, Menu, Plus, Folder, FolderOpen,
   Trash2, Activity, Check, X, Globe, Download, Upload,
   Server, BarChart3, MonitorCheck, AlertTriangle, Settings, ClipboardList, GitBranch, Network, LayoutDashboard,
 } from "lucide-react";
@@ -131,11 +131,14 @@ const MODULES = [
   { id: "parametres", label: "Paramètres",        Icon: Settings },
 ];
 
-export default function Sidebar({ groups, activeGroupId, onSelect, onAddGroup, onRemoveGroup, onRenameGroup, open, onToggle, checkingIds, totalUrls, totalOnline, onImport, activeModule = "monitor", onSelectModule, journalBadge = 0, todoBadge = 0, serversBadge = 0, agentsBadge = 0 }) {
+export default function Sidebar({ groups, activeGroupId, onSelect, onAddGroup, onRemoveGroup, onRenameGroup, open, onToggle, checkingIds, totalUrls, totalOnline, onImport, activeModule = "monitor", onSelectModule, journalBadge = 0, todoBadge = 0, serversBadge = 0, agentsBadge = 0, isMobile = false }) {
   const [adding, setAdding] = useState(false);
   const [newName, setNewName] = useState("");
   const [editingId, setEditingId] = useState(null);
   const [editName, setEditName] = useState("");
+
+  /* Sur mobile : le drawer est toujours 240px et montre les labels */
+  const showFull = isMobile || open;
 
   const confirmAdd = () => {
     const name = newName.trim();
@@ -156,19 +159,36 @@ export default function Sidebar({ groups, activeGroupId, onSelect, onAddGroup, o
   };
 
   return (
+    <>
+      {/* Backdrop mobile : ferme le drawer au clic */}
+      {isMobile && open && (
+        <div
+          onClick={onToggle}
+          style={{
+            position: "fixed", inset: 0,
+            background: "rgba(0,0,0,0.6)", zIndex: 49,
+          }}
+        />
+      )}
     <aside style={{
-      width: open ? 200 : 48, minWidth: open ? 200 : 48,
+      width: isMobile ? 240 : (open ? 200 : 48),
+      minWidth: isMobile ? 240 : (open ? 200 : 48),
       background: "#0D1117", borderRight: "1px solid rgba(255,255,255,0.07)",
-      display: "flex", flexDirection: "column", transition: "width 0.25s ease, min-width 0.25s ease",
-      overflow: "hidden", height: "100vh", position: "sticky", top: 0, flexShrink: 0,
+      display: "flex", flexDirection: "column",
+      transition: isMobile ? "transform 0.25s ease" : "width 0.25s ease, min-width 0.25s ease",
+      overflow: "hidden", height: "100vh",
+      position: isMobile ? "fixed" : "sticky",
+      top: 0, left: 0, flexShrink: 0,
+      zIndex: isMobile ? 50 : undefined,
+      transform: isMobile && !open ? "translateX(-100%)" : "translateX(0)",
     }}>
       <div style={{
-        display: "flex", flexDirection: "column", alignItems: open ? "flex-end" : "center",
+        display: "flex", flexDirection: "column", alignItems: showFull ? "flex-end" : "center",
         padding: "12px 10px 14px",
         borderBottom: "1px solid rgba(255,255,255,0.06)",
         gap: 12,
       }}>
-        {/* Bouton rétractation */}
+        {/* Bouton rétractation / fermeture drawer */}
         <button onClick={onToggle} style={{
           background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.08)",
           borderRadius: 8, width: 28, height: 28, display: "flex", alignItems: "center",
@@ -178,22 +198,22 @@ export default function Sidebar({ groups, activeGroupId, onSelect, onAddGroup, o
           onMouseEnter={e => e.currentTarget.style.color = "#F3F4F6"}
           onMouseLeave={e => e.currentTarget.style.color = "#9CA3AF"}
         >
-          {open ? <ChevronLeft size={14} /> : <ChevronRight size={14} />}
+          {isMobile ? <X size={14} /> : (open ? <ChevronLeft size={14} /> : <ChevronRight size={14} />)}
         </button>
         {/* Logo centré */}
         <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 6, width: "100%" }}>
           <img src="/g1oeil_icone_app.svg" alt="logo" style={{
-            width: open ? 52 : 38, height: open ? 52 : 38, borderRadius: 12, objectFit: "contain",
+            width: showFull ? 52 : 38, height: showFull ? 52 : 38, borderRadius: 12, objectFit: "contain",
             transition: "width 0.25s ease, height 0.25s ease",
           }} />
-          {open && (
+          {showFull && (
             <span style={{ fontSize: 9, color: "#6B7280", letterSpacing: "0.08em", textTransform: "uppercase" }}>Live Monitor</span>
           )}
         </div>
       </div>
 
       {/* ── Modules ── */}
-      {open && (
+      {showFull && (
         <div style={{ padding: "10px 10px 4px", fontSize: 10, color: "#4B5563", letterSpacing: "0.08em", textTransform: "uppercase" }}>
           Modules
         </div>
@@ -226,7 +246,7 @@ export default function Sidebar({ groups, activeGroupId, onSelect, onAddGroup, o
                   <span style={{ position: "absolute", top: -4, right: badge > 0 ? 6 : -4, width: 8, height: 8, borderRadius: "50%", background: "#34D399", border: "2px solid #0D1117" }} />
                 )}
               </div>
-              {open && (
+              {showFull && (
                 <span style={{
                   flex: 1, fontSize: 13, color: isActive ? "#E5E7EB" : "#9CA3AF",
                   fontWeight: isActive ? 600 : 400, whiteSpace: "nowrap",
@@ -234,10 +254,10 @@ export default function Sidebar({ groups, activeGroupId, onSelect, onAddGroup, o
                   {label}
                 </span>
               )}
-              {open && badge > 0 && (
+              {showFull && badge > 0 && (
                 <span style={{ fontSize: 9, padding: "1px 5px", borderRadius: 8, background: "rgba(248,113,113,0.2)", color: "#F87171", fontWeight: 700 }}>{badge}</span>
               )}
-              {open && greenBadge > 0 && (
+              {showFull && greenBadge > 0 && (
                 <span style={{ fontSize: 9, padding: "1px 5px", borderRadius: 8, background: "rgba(52,211,153,0.2)", color: "#34D399", fontWeight: 700 }}>{greenBadge}</span>
               )}
             </div>
@@ -245,7 +265,7 @@ export default function Sidebar({ groups, activeGroupId, onSelect, onAddGroup, o
         })}
       </div>
 
-      {open && (
+      {showFull && (
         <div style={{ padding: "10px 10px 4px", fontSize: 10, color: "#4B5563", letterSpacing: "0.08em", textTransform: "uppercase" }}>
           Groupes URL's
         </div>
@@ -264,11 +284,11 @@ export default function Sidebar({ groups, activeGroupId, onSelect, onAddGroup, o
 
           return (
             <div key={g.id} style={{
-              display: "flex", alignItems: "center", gap: 8, padding: open ? "7px 10px" : "7px 0",
+              display: "flex", alignItems: "center", gap: 8, padding: showFull ? "7px 10px" : "7px 0",
               borderRadius: 9, marginBottom: 2, cursor: "pointer",
               background: isActive ? "rgba(99,102,241,0.15)" : "transparent",
               border: isActive ? "1px solid rgba(99,102,241,0.25)" : "1px solid transparent",
-              transition: "background 0.15s", justifyContent: open ? "flex-start" : "center",
+              transition: "background 0.15s", justifyContent: showFull ? "flex-start" : "center",
             }}
               onClick={() => { if (editingId !== g.id) onSelect(g.id); }}
               onMouseEnter={e => { if (!isActive) e.currentTarget.style.background = "rgba(255,255,255,0.04)"; }}
@@ -278,7 +298,7 @@ export default function Sidebar({ groups, activeGroupId, onSelect, onAddGroup, o
                 <FolderIcon size={16} />
               </div>
 
-              {open && (
+              {showFull && (
                 <>
                   {editingId === g.id ? (
                     <input
@@ -335,7 +355,7 @@ export default function Sidebar({ groups, activeGroupId, onSelect, onAddGroup, o
           );
         })}
 
-        {open && (
+        {showFull && (
           adding ? (
             <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "6px 10px", marginTop: 4 }}>
               <input
@@ -372,12 +392,13 @@ export default function Sidebar({ groups, activeGroupId, onSelect, onAddGroup, o
         )}
       </nav>
 
-      {open && (
+      {showFull && (
         <div style={{ padding: "10px 12px", borderTop: "1px solid rgba(255,255,255,0.06)", display: "flex", flexDirection: "column", gap: 6 }}>
           <ExportImportButtons groups={groups} onImport={onImport} />
           <div style={{ fontSize: 10, color: "#374151", textAlign: "center" }}>Double-clic pour renommer</div>
         </div>
       )}
     </aside>
+    </>
   );
 }

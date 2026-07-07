@@ -227,6 +227,75 @@ function screenshotPlugin() {
   };
 }
 
+/* ── Plugin LAN Sync : partage d'état entre desktop et mobile (même réseau) ─── */
+function lanSyncPlugin() {
+  let _state = null;        // dernier état poussé
+  const _clients = new Set(); // clients SSE connectés
+
+  return {
+    name: 'lan-sync-middleware',
+    configureServer(server) {
+
+      /* ── SSE stream : notifications temps réel ── */
+      server.middlewares.use('/api/sync/stream', (req, res) => {
+        res.setHeader('Content-Type', 'text/event-stream');
+        res.setHeader('Cache-Control', 'no-cache');
+        res.setHeader('Connection', 'keep-alive');
+        res.setHeader('Access-Control-Allow-Origin', '*');
+        res.flushHeaders?.();
+
+        /* Envoyer immédiatement le timestamp si un état existe déjà */
+        if (_state) {
+          res.write(`data: ${JSON.stringify({ syncedAt: _state.syncedAt })}\n\n`);
+        } else {
+          res.write(': connected\n\n');
+        }
+
+        _clients.add(res);
+        req.on('close', () => { _clients.delete(res); });
+      });
+
+      /* ── GET/POST /api/sync ── */
+      server.middlewares.use('/api/sync', (req, res) => {
+        res.setHeader('Content-Type', 'application/json');
+        res.setHeader('Access-Control-Allow-Origin', '*');
+        res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+        if (req.method === 'OPTIONS') { res.statusCode = 204; return res.end(); }
+
+        /* GET — retourne l'état actuel */
+        if (req.method === 'GET') {
+          if (!_state) { res.statusCode = 204; return res.end('{}'); }
+          return res.end(JSON.stringify(_state));
+        }
+
+        /* POST — enregistre le nouvel état et notifie les clients SSE */
+        if (req.method === 'POST') {
+          let body = '';
+          req.on('data', d => { body += d; });
+          req.on('end', () => {
+            try {
+              _state = JSON.parse(body);
+              const msg = `data: ${JSON.stringify({ syncedAt: _state.syncedAt })}\n\n`;
+              for (const client of _clients) {
+                try { client.write(msg); } catch { _clients.delete(client); }
+              }
+              console.log(`\x1b[36m[LAN Sync]\x1b[0m État reçu — ${Object.keys(_state.data || {}).join(', ')} — ${_clients.size} client(s) connecté(s)`);
+              return res.end(JSON.stringify({ ok: true, clients: _clients.size }));
+            } catch (e) {
+              res.statusCode = 400;
+              return res.end(JSON.stringify({ error: e.message }));
+            }
+          });
+          return;
+        }
+
+        res.statusCode = 405;
+        res.end(JSON.stringify({ error: 'Method not allowed' }));
+      });
+    },
+  };
+}
+
 /* ── Plugin ITCare : proxy OAuth2 + ressources compute ─────────────────────── */
 function itcarePlugin() {
   const TOKEN_URL = 'https://accounts.cegedim.cloud/auth/realms/cloud/protocol/openid-connect/token';
@@ -719,7 +788,7 @@ function itcarePlugin() {
 }
 
 export default defineConfig({
-  plugins: [react(), sslCheckPlugin(), screenshotPlugin(), itcarePlugin()],
+  plugins: [react(), sslCheckPlugin(), screenshotPlugin(), lanSyncPlugin(), itcarePlugin()],
   server: {
     port: 5173,
     strictPort: true,

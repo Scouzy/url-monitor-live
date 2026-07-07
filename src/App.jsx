@@ -1,5 +1,5 @@
 ﻿import { useState, useEffect, useRef, useCallback, useSyncExternalStore } from "react";
-import { Globe, Plus, RefreshCw, Pause, Play, Wifi, WifiOff, Zap, LayoutGrid, List, Search, X, Activity, AlertTriangle, Settings, Bell, BellOff, Lock, CheckCircle, Server } from "lucide-react";2.
+import { Globe, Plus, RefreshCw, Pause, Play, Wifi, WifiOff, Zap, LayoutGrid, List, Search, X, Activity, AlertTriangle, Settings, Bell, BellOff, Lock, CheckCircle, Server, Menu } from "lucide-react";2.
 import { STATUS, DEFAULT_INTERVAL, MAX_HISTORY, getStatus } from "./constants";
 import { checkUrl } from "./utils/checkUrl";
 import { checkSsl } from "./utils/checkSsl";
@@ -26,6 +26,7 @@ import { loadVpsAgents, fetchVpsMetrics, setAgentMetrics, setAgentError, subscri
 import { loadCapacitySettings, saveCapacitySettings } from "./utils/capacitySettings";
 import { loadTodos } from "./utils/todoStorage";
 import { clearSnapshots } from "./utils/snapshots";
+import { pushSync, pullSync, subscribeSyncStream } from "./utils/lanSync";
 
 export default function App() {
   const [groups, setGroups] = useState(() => loadGroups() || getDefaultGroups());
@@ -33,7 +34,8 @@ export default function App() {
     const g = loadGroups() || getDefaultGroups();
     return g[0]?.id;
   });
-  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [sidebarOpen, setSidebarOpen] = useState(() => typeof window !== 'undefined' ? window.innerWidth >= 768 : true);
+  const [isMobile, setIsMobile] = useState(() => typeof window !== 'undefined' ? window.innerWidth < 768 : false);
   const [viewMode, setViewMode] = useState("grid");
   const [filterText, setFilterText] = useState("");
   const [filterStatus, setFilterStatus] = useState("all");
@@ -55,6 +57,40 @@ export default function App() {
   const [todoBadge, setTodoBadge] = useState(() => loadTodos().filter(t => t.status !== "done").length);
 
   useEffect(() => { localStorage.setItem("g1oeil_module", activeModule); }, [activeModule]);
+
+  /* ── Détection mobile / resize ── */
+  useEffect(() => {
+    const handler = () => {
+      const mobile = window.innerWidth < 768;
+      setIsMobile(mobile);
+      if (!mobile && !sidebarOpen) setSidebarOpen(true); /* rouvrir automatiquement en desktop */
+    };
+    window.addEventListener('resize', handler);
+    return () => window.removeEventListener('resize', handler);
+  }, [sidebarOpen]);
+
+  /* ── LAN Sync : pull au démarrage + SSE ── */
+  useEffect(() => {
+    /* Pull initial : appliquer les données du desktop si plus récentes */
+    const timer = setTimeout(async () => {
+      const updated = await pullSync();
+      if (updated) window.location.reload(); /* rechargement léger pour que les stores React voient le nouveau localStorage */
+    }, 2000);
+    /* Abonnement SSE : nouveau push du desktop → pull automatique */
+    const unsubSSE = subscribeSyncStream(async () => {
+      const updated = await pullSync();
+      if (updated) window.location.reload();
+    });
+    return () => { clearTimeout(timer); unsubSSE(); };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  /* ── LAN Sync : push quand les serveurs changent (desktop → mobile) ── */
+  const pushSyncTimerRef = useRef(null);
+  useEffect(() => {
+    clearTimeout(pushSyncTimerRef.current);
+    pushSyncTimerRef.current = setTimeout(() => { pushSync(); }, 3000);
+    return () => clearTimeout(pushSyncTimerRef.current);
+  }, [allServers]);
 
   /* ── Auto-refresh ITCare (mode client credentials uniquement, toutes les 5 min) ──
      Actualise automatiquement les données si clientId + clientSecret sont mémorisés.
@@ -462,6 +498,7 @@ export default function App() {
         onRenameGroup={renameGroup}
         open={sidebarOpen}
         onToggle={() => setSidebarOpen(o => !o)}
+        isMobile={isMobile}
         checkingIds={checkingIds}
         totalUrls={allUrls.length}
         totalOnline={totalOnline}
@@ -487,7 +524,15 @@ export default function App() {
             background: "rgba(255,255,255,0.02)", backdropFilter: "blur(12px)",
             position: "sticky", top: 0, zIndex: 10,
           }}>
-            <div>
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              {isMobile && (
+                <button onClick={() => setSidebarOpen(true)} style={{
+                  background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.08)",
+                  borderRadius: 8, width: 32, height: 32, display: "flex", alignItems: "center", justifyContent: "center",
+                  color: "#9CA3AF", cursor: "pointer", flexShrink: 0,
+                }}><Menu size={16} /></button>
+              )}
+              <div>
               <h1 style={{ fontSize: 16, fontWeight: 700, color: "#F9FAFB", margin: 0 }}>
                 {activeModule === "servers"
                   ? ({ inventory: "Inventaire serveurs", agents: "Agents VPS", config: "Configuration agents", deploy: "Déploiement en masse" }[serverSubTab] || "Serveurs")
@@ -498,6 +543,8 @@ export default function App() {
                   ? ({ inventory: "CPU, RAM et disque en temps réel par serveur", agents: "Supervision temps réel · Linux & Windows · CPU / RAM / Disque / Réseau / Processus / Répertoires", config: "Ajouter · modifier · tester les agents VPS · télécharger les scripts", deploy: "Scripts pré-remplis SSH · WinRM · Ansible pour déployer les agents sur tout l'inventaire" }[serverSubTab] || "")
                   : ({ dashboard: "Vue synthetique - KPIs - alertes - SSL - performance", capacity: "Projections 6 mois · seuil critique 90% · recommandations", todo: "Tâches en cours · auto-générées + manuelles", workflows: "Création et gestion de procédures d'intervention pas à pas", impacts: "Cartographie des dépendances entre applications et serveurs", journal: "Historique des événements · pannes · SSL · serveurs", parametres: "Configuration de l'application" }[activeModule] || "")}
               </p>
+            </div>
+              </div>
             </div>
             {activeModule === "servers" && serverSubTab === "inventory" && <ServerImport />}
           </header>
@@ -543,13 +590,22 @@ export default function App() {
           background: "rgba(255,255,255,0.02)", backdropFilter: "blur(12px)",
           position: "sticky", top: 0, zIndex: 10,
         }}>
-          <div>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            {isMobile && (
+              <button onClick={() => setSidebarOpen(true)} style={{
+                background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.08)",
+                borderRadius: 8, width: 32, height: 32, display: "flex", alignItems: "center", justifyContent: "center",
+                color: "#9CA3AF", cursor: "pointer", flexShrink: 0,
+              }}><Menu size={16} /></button>
+            )}
+            <div>
             <h1 style={{ fontSize: 16, fontWeight: 700, color: "#F9FAFB", margin: 0 }}>
               {isAllView ? "Tous les sites" : (activeGroup?.name || "—")}
             </h1>
             <p style={{ fontSize: 11, color: "#4B5563", margin: 0 }}>
               {totalOnline}/{allUrls.length} en ligne · {groups.length} groupe{groups.length > 1 ? "s" : ""}
             </p>
+            </div>
           </div>
 
           <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
