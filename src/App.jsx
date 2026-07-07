@@ -21,7 +21,7 @@ import VpsAgentsConfig from "./components/VpsAgentsConfig";
 import AgentDeployMass from "./components/AgentDeployMass";
 import SettingsPage from "./components/SettingsPage";
 import DashboardPage from "./components/DashboardPage";
-import { subscribeServers, getServers, setServers, getServersMeta, recommendations as getRecos, patchServerMetrics } from "./utils/servers";
+import { subscribeServers, getServers, setServers, getServersMeta, recommendations as getRecos, patchServerMetrics, refreshFromStorage } from "./utils/servers";
 import { loadVpsAgents, fetchVpsMetrics, setAgentMetrics, setAgentError, subscribeAgents, getAllAgentMetrics } from "./utils/vpsAgents";
 import { loadCapacitySettings, saveCapacitySettings } from "./utils/capacitySettings";
 import { loadTodos } from "./utils/todoStorage";
@@ -76,12 +76,12 @@ export default function App() {
     /* Pull initial : appliquer les données du desktop si plus récentes */
     const timer = setTimeout(async () => {
       const updated = await pullSync();
-      if (updated) window.location.reload(); /* rechargement léger pour que les stores React voient le nouveau localStorage */
+      if (updated) refreshFromStorage(); /* rafraîchit les stores React sans rechargement de page */
     }, 2000);
     /* Abonnement SSE : nouveau push du desktop → pull automatique */
     const unsubSSE = subscribeSyncStream(async () => {
       const updated = await pullSync();
-      if (updated) window.location.reload();
+      if (updated) refreshFromStorage();
     });
     return () => { clearTimeout(timer); unsubSSE(); };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps

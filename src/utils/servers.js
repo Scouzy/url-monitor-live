@@ -411,6 +411,15 @@ export function restoreServersBackup(backup) {
   } catch { return false; }
 }
 
+/* ── Recharge depuis localStorage sans rechargement de page (LAN Sync mobile) ── */
+export function refreshFromStorage() {
+  const fresh = loadPersisted();
+  if (fresh) {
+    _cache = fresh;
+    _listeners.forEach(fn => fn());
+  }
+}
+
 export function resetServers() {
   localStorage.removeItem(LS_KEY);
   clearSnapshots();
