@@ -349,15 +349,19 @@ function itcarePlugin() {
     'creationTime','creationUser','comment',
   ]);
 
-  const DETAIL_FIELDS_WANTED = ['ip','ipAddress','ipAddresses','networkInterfaces',
-    'cpuCount','vcpuCount','vcpu','cores','nbCpu',
-    'cpuUsage','cpuPercent','memoryGb','memoryMb','memory','ramGb',
-    'diskGb','diskMb','storageGb','applications','relatedApplications'];
+  /* Champs confirmés via DevTools sur GET /compute/instances/{internalResourceId} :
+     ram, cpu, storage, backup{backupSystem,size,type,lastDate}, backupPolicyDetails{backups,policies},
+     patchParty{excluded,exclusionReason,patchGroup,patchDate,patchTag}, network, loadbalancers,
+     availabilityZone, area, region, replication, isMemberOFLoadBalancer, ipAddress */
+  const DETAIL_FIELDS_WANTED = ['ipAddress','cpu','ram','storage','backup','backupPolicyDetails',
+    'backupStatus','patchParty','network','loadbalancers','availabilityZone','area','region',
+    'replication','isMemberOFLoadBalancer','storageMoveInProgress','authenticationDomain'];
 
-  /* Sonde GET /compute/resources/{id} sur le 1er item pour détecter les champs supplémentaires */
-  async function probeDetailEndpoint(token, id) {
+  /* Sonde GET {path}/{internalResourceId} sur le 1er item pour détecter les champs supplémentaires
+     confirmé via DevTools : GET /compute/instances/{internalResourceId} (path vient de la liste) */
+  async function probeDetailEndpoint(token, path, id) {
     try {
-      const r = await fetch(`${API_BASE}/compute/resources/${id}`, {
+      const r = await fetch(`${API_BASE}${path}/${id}`, {
         headers: { 'Authorization': `Bearer ${token}` },
         signal: AbortSignal.timeout(6000),
       });
@@ -365,8 +369,8 @@ function itcarePlugin() {
       const data = await r.json();
       const extraKeys = Object.keys(data).filter(k => !LIST_FIELDS.has(k));
       const usefulKeys = extraKeys.filter(k => DETAIL_FIELDS_WANTED.includes(k));
-      console.log('\x1b[36m[ITCare]\x1b[0m GET /compute/resources/{id} — champs supplémentaires :', extraKeys.join(' | ') || '(aucun)');
-      console.log('\x1b[36m[ITCare]\x1b[0m Champs utiles trouvés :', usefulKeys.join(' | ') || '(aucun — IP/CPU/RAM non disponibles via ce endpoint)');
+      console.log(`\x1b[36m[ITCare]\x1b[0m GET ${path}/{id} — champs supplémentaires :`, extraKeys.join(' | ') || '(aucun)');
+      console.log('\x1b[36m[ITCare]\x1b[0m Champs utiles trouvés :', usefulKeys.join(' | ') || '(aucun)');
       return { extraKeys, usefulKeys, sample: data };
     } catch (e) {
       console.log('\x1b[33m[ITCare]\x1b[0m Endpoint détail indisponible :', e.message);
@@ -374,20 +378,24 @@ function itcarePlugin() {
     }
   }
 
-  /* Enrichit chaque ressource avec les données du endpoint détail (batch de 10) */
+  /* Enrichit chaque ressource avec les données du endpoint détail (batch de 10) —
+     source de vérité pour ram/cpu/storage/backup/patchParty (corrige les valeurs erronées de la liste) */
   async function enrichWithDetails(resources, token) {
     if (resources.length === 0) return resources;
 
-    const probe = await probeDetailEndpoint(token, resources[0].id);
-    if (!probe || probe.usefulKeys.length === 0) return resources;  /* Rien de nouveau */
+    const first = resources.find(r => r.path && r.internalResourceId) || resources[0];
+    const probe = await probeDetailEndpoint(token, first.path || '/compute/instances', first.internalResourceId || first.id);
+    if (!probe) { console.log('\x1b[33m[ITCare]\x1b[0m Endpoint détail indisponible pour toutes les ressources.'); return resources; }
 
-    console.log(`\x1b[36m[ITCare]\x1b[0m Enrichissement de ${resources.length} ressources (batch 10)…`);
+    console.log(`\x1b[36m[ITCare]\x1b[0m Enrichissement détail de ${resources.length} ressources (batch 10)…`);
     const BATCH = 10;
     const result = [...resources];
     for (let i = 0; i < result.length; i += BATCH) {
       await Promise.all(result.slice(i, i + BATCH).map(async (r, bi) => {
         try {
-          const res = await fetch(`${API_BASE}/compute/resources/${r.id}`, {
+          const id = r.internalResourceId || r.id;
+          const path = r.path || '/compute/instances';
+          const res = await fetch(`${API_BASE}${path}/${id}`, {
             headers: { 'Authorization': `Bearer ${token}` },
             signal: AbortSignal.timeout(8000),
           });
@@ -395,7 +403,143 @@ function itcarePlugin() {
         } catch {}
       }));
     }
-    console.log('\x1b[36m[ITCare]\x1b[0m Enrichissement terminé.');
+    console.log('\x1b[36m[ITCare]\x1b[0m Enrichissement détail terminé.');
+    return result;
+  }
+
+  /* Stockage détaillé par point de montage — confirmé via DevTools :
+     GET {path}/{internalResourceId}/storage → { totalSizeDisks, fileSystems:[{mountingPoint,sizeOf,free}], totalSizeFileSystems } */
+  async function enrichWithStorage(resources, token) {
+    if (resources.length === 0) return resources;
+    console.log(`\x1b[36m[ITCare]\x1b[0m Stockage détaillé : interrogation de ${resources.length} ressources…`);
+    const BATCH = 10;
+    const result = [...resources];
+    let found = 0;
+    for (let i = 0; i < result.length; i += BATCH) {
+      await Promise.all(result.slice(i, i + BATCH).map(async (r, bi) => {
+        try {
+          const id = r.internalResourceId || r.id;
+          const path = r.path || '/compute/instances';
+          const res = await fetch(`${API_BASE}${path}/${id}/storage`, {
+            headers: { 'Authorization': `Bearer ${token}` },
+            signal: AbortSignal.timeout(8000),
+          });
+          if (!res.ok) return;
+          const data = await res.json();
+          if (data && Array.isArray(data.fileSystems)) { result[i + bi] = { ...result[i + bi], _storage: data }; found++; }
+        } catch {}
+      }));
+    }
+    console.log(`\x1b[36m[ITCare]\x1b[0m Stockage détaillé : ${found}/${resources.length} ressources renseignées.`);
+    return result;
+  }
+
+  /* Snapshots — confirmé via DevTools : GET {path}/{internalResourceId}/snapshots (souvent vide, 204) */
+  async function enrichWithSnapshots(resources, token) {
+    if (resources.length === 0) return resources;
+    console.log(`\x1b[36m[ITCare]\x1b[0m Snapshots : interrogation de ${resources.length} ressources…`);
+    const BATCH = 10;
+    const result = [...resources];
+    let found = 0;
+    for (let i = 0; i < result.length; i += BATCH) {
+      await Promise.all(result.slice(i, i + BATCH).map(async (r, bi) => {
+        try {
+          const id = r.internalResourceId || r.id;
+          const path = r.path || '/compute/instances';
+          const res = await fetch(`${API_BASE}${path}/${id}/snapshots`, {
+            headers: { 'Authorization': `Bearer ${token}` },
+            signal: AbortSignal.timeout(8000),
+          });
+          if (!res.ok) return;
+          const text = await res.text();
+          if (!text) return;
+          const data = JSON.parse(text);
+          const arr = Array.isArray(data) ? data : (data.content || []);
+          if (arr.length > 0) { result[i + bi] = { ...result[i + bi], _snapshots: arr }; found++; }
+        } catch {}
+      }));
+    }
+    console.log(`\x1b[36m[ITCare]\x1b[0m Snapshots : ${found}/${resources.length} ressources avec snapshot(s).`);
+    return result;
+  }
+
+  /* Monitoring temps réel — confirmé via DevTools :
+     GET /monitoring/resources/{internalResourceId}/chart?start=&end=&graph-name=&points=
+     Linux   (confirmé) : SYS_LNX_CPU_USAGE.total_cpu_avg (%) | SYS_LNX_MEMORY_USAGE.used_prct (%) + used/memory (bytes)
+     Windows (confirmé) : SYS_WIN_CPU_USAGE.cpu (%)           | SYS_WIN_PHYSICAL_MEMORY["physical %"] (%) + physical (Go, déjà en Go) */
+  const MONITORING_GRAPHS = {
+    windows: { cpu: 'SYS_WIN_CPU_USAGE', cpuKey: 'cpu',           mem: 'SYS_WIN_PHYSICAL_MEMORY', memPctKey: 'physical %', memGbKey: 'physical' },
+    linux:   { cpu: 'SYS_LNX_CPU_USAGE', cpuKey: 'total_cpu_avg', mem: 'SYS_LNX_MEMORY_USAGE',     memPctKey: 'used_prct',  memGbKey: null },
+  };
+
+  /* Dernière valeur numérique valide d'une série [[ts, val], ...] */
+  function latestPoint(series) {
+    if (!Array.isArray(series)) return null;
+    for (let i = series.length - 1; i >= 0; i--) {
+      const v = series[i]?.[1];
+      if (typeof v === 'number' && Number.isFinite(v)) return v;
+    }
+    return null;
+  }
+
+  async function fetchChart(id, token, graphName) {
+    const end = Math.floor(Date.now() / 1000);
+    const start = end - 2 * 3600; // fenêtre de 2h — réponse plus légère, dernière valeur toujours fiable
+    const url = `${API_BASE}/monitoring/resources/${id}/chart?start=${start}&end=${end}&graph-name=${graphName}&points=30`;
+    const res = await fetch(url, { headers: { 'Authorization': `Bearer ${token}` }, signal: AbortSignal.timeout(5000) });
+    if (!res.ok) return null;
+    const data = await res.json();
+    /* La réponse est { "{id}": { "{graphName}": {...} } }.
+       Essayer la clé exacte (r.id numérique) puis la première disponible en fallback. */
+    const graphData = data?.[String(id)] ?? Object.values(data || {})[0] ?? null;
+    return graphData?.[graphName] ?? null;
+  }
+
+  async function enrichWithMonitoring(resources, token) {
+    if (resources.length === 0) return resources;
+    console.log(`\x1b[36m[ITCare]\x1b[0m Monitoring CPU/RAM temps réel : interrogation de ${resources.length} ressources…`);
+    const BATCH = 8;
+    const result = [...resources];
+    let found = 0;
+    for (let i = 0; i < result.length; i += BATCH) {
+      await Promise.all(result.slice(i, i + BATCH).map(async (r, bi) => {
+        try {
+          /* Monitoring utilise le r.id numérique de la liste (ex: 5350129) — PAS internalResourceId */
+          const id = r.id ?? r.internalResourceId;
+          const isWin = /windows/i.test(String(r.family || '')) || /windows/i.test(String(r.path || ''));
+          if (i === 0 && bi === 0) {
+            console.log(`\x1b[36m[ITCare]\x1b[0m Monitoring debug 1er srv : r.id=${r.id} | internalResourceId=${r.internalResourceId} | id utilisé=${id} | family=${r.family} | isWin=${isWin}`);
+          }
+          const g = isWin ? MONITORING_GRAPHS.windows : MONITORING_GRAPHS.linux;
+          const [cpuSeries, memSeries] = await Promise.all([
+            fetchChart(id, token, g.cpu),
+            fetchChart(id, token, g.mem),
+          ]);
+          const cpuPct  = latestPoint(cpuSeries?.[g.cpuKey]);
+          const ramPct  = latestPoint(memSeries?.[g.memPctKey]);
+          /* Windows: physical est déjà en Go | Linux: used est en bytes */
+          const ramUsedGb = isWin
+            ? (g.memGbKey ? latestPoint(memSeries?.[g.memGbKey]) : null)
+            : (() => { const b = latestPoint(memSeries?.used); return b != null ? b / 1073741824 : null; })();
+          const ramTotalGb = isWin
+            ? null
+            : (() => { const b = latestPoint(memSeries?.memory); return b != null ? b / 1073741824 : null; })();
+          if (cpuPct != null || ramPct != null) {
+            result[i + bi] = {
+              ...result[i + bi],
+              _monitoring: {
+                cpuPct:    cpuPct    != null ? Math.round(cpuPct    * 10) / 10 : null,
+                ramPct:    ramPct    != null ? Math.round(ramPct    * 10) / 10 : null,
+                ramUsedGb: ramUsedGb != null ? Math.round(ramUsedGb * 10) / 10 : null,
+                ramTotalGb: ramTotalGb != null ? Math.round(ramTotalGb * 10) / 10 : null,
+              },
+            };
+            found++;
+          }
+        } catch {}
+      }));
+    }
+    console.log(`\x1b[36m[ITCare]\x1b[0m Monitoring CPU/RAM temps réel : ${found}/${resources.length} ressources renseignées.`);
     return result;
   }
 
@@ -438,7 +582,29 @@ function itcarePlugin() {
               console.log(`\x1b[36m[ITCare]\x1b[0m  name=${sample.name} | env=${sample.environment} | serviceName=${sample.serviceName}`);
             }
 
-            resources = await enrichWithDetails(resources, token);
+            /* ── Stratégie d'enrichissement optimisée ─────────────────────────────────
+               - Details + Storage en parallèle (endpoints distincts, pas de conflit)
+               - enrichWithSnapshots supprimé (retourne toujours 0/237, overhead inutile)
+               - Monitoring séquentiel conservé (évite le throttling côté API ITCare) */
+            const _t0 = Date.now();
+            const [withDetails, withStorage] = await Promise.all([
+              enrichWithDetails([...resources], token),
+              enrichWithStorage([...resources], token),
+            ]);
+            resources = withDetails.map((r, i) => ({
+              ...r,
+              ...(withStorage[i]?._storage ? { _storage: withStorage[i]._storage } : {}),
+            }));
+            resources = await enrichWithMonitoring(resources, token);
+            console.log(`\x1b[36m[ITCare]\x1b[0m Enrichissement total terminé en ${Date.now() - _t0}ms`);
+
+            if (resources.length > 0) {
+              const s2 = resources.find(r => r.ram != null) || resources[0];
+              console.log(`\x1b[36m[ITCare]\x1b[0m Apr\u00e8s enrichissement : ram=${s2.ram} | cpu=${s2.cpu} | storage=${s2.storage} | backup=${JSON.stringify(s2.backup)} | patchGroup=${s2.patchParty?.patchGroup}`);
+              const s3 = resources.find(r => r._monitoring?.cpuPct != null) || resources[0];
+              console.log(`\x1b[36m[ITCare]\x1b[0m Monitoring : cpuPct=${s3._monitoring?.cpuPct} | ramPct=${s3._monitoring?.ramPct} | ramUsedGb=${s3._monitoring?.ramUsedGb}`);
+            }
+
             res.end(JSON.stringify({
               servers: resources,
               total: resources.length,
@@ -446,6 +612,49 @@ function itcarePlugin() {
             }));
           } catch (e) {
             _tokenCache = null;
+            res.statusCode = 500;
+            res.end(JSON.stringify({ error: e.message }));
+          }
+        });
+      });
+
+      /* ── /api/itcare-subprobe : sonde les sub-endpoints sur un serveur donné ── */
+      server.middlewares.use('/api/itcare-subprobe', (req, res) => {
+        res.setHeader('Content-Type', 'application/json');
+        res.setHeader('Access-Control-Allow-Origin', '*');
+        res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+        if (req.method === 'OPTIONS') { res.statusCode = 204; return res.end(); }
+        if (req.method !== 'POST')    { res.statusCode = 405; return res.end(JSON.stringify({ error: 'POST requis' })); }
+        let body = '';
+        req.on('data', d => { body += d; });
+        req.on('end', async () => {
+          try {
+            const payload = JSON.parse(body || '{}');
+            const parsed = parseAuthToken(payload);
+            if (!parsed) return res.end(JSON.stringify({ error: 'Auth manquante' }));
+            const { resourceId } = payload;
+            if (!resourceId) return res.end(JSON.stringify({ error: 'resourceId manquant' }));
+            const token = parsed.mode === 'token' ? parsed.value : await getToken(parsed.clientId, parsed.clientSecret);
+            const results = {};
+            const SUBPROBE_PATHS = ['backup-policies', 'networks', 'history', 'tags', 'patch-policy'];
+            await Promise.allSettled(SUBPROBE_PATHS.map(async (path) => {
+              try {
+                const r = await fetch(`${API_BASE}/compute/resources/${resourceId}/${path}`, {
+                  headers: { 'Authorization': `Bearer ${token}` },
+                  signal: AbortSignal.timeout(6000),
+                });
+                results[path] = { status: r.status, available: r.ok };
+                if (r.ok) {
+                  const data = await r.json();
+                  results[path].sample = Array.isArray(data) ? data.slice(0, 2) : data;
+                  results[path].keys = Array.isArray(data)
+                    ? (data[0] ? Object.keys(data[0]) : [])
+                    : Object.keys(data);
+                }
+              } catch (e) { results[path] = { available: false, error: e.message }; }
+            }));
+            res.end(JSON.stringify({ resourceId, results }));
+          } catch (e) {
             res.statusCode = 500;
             res.end(JSON.stringify({ error: e.message }));
           }
@@ -471,7 +680,10 @@ function itcarePlugin() {
             /* Tous les champs de la liste */
             const allKeys = [...new Set(resources.flatMap(r => Object.keys(r)))].sort();
             /* Sonde le endpoint détail sur le 1er item */
-            const detail = resources.length > 0 ? await probeDetailEndpoint(token, resources[0].id) : null;
+            const firstR = resources.find(r => r.path && r.internalResourceId) || resources[0];
+            const detail = resources.length > 0
+              ? await probeDetailEndpoint(token, firstR.path || '/compute/instances', firstR.internalResourceId || firstR.id)
+              : null;
             /* Trouve un item qui a cpu ET/OU ipAddress pour montrer des valeurs réelles */
             const richSample = resources.find(r => r.cpu != null || r.ipAddress || r.ram != null || r.network) || resources[0];
             /* Résumé des valeurs réelles pour les champs clés */

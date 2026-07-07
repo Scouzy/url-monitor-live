@@ -3,6 +3,7 @@ import {
   Server, Search, X, Cpu, MemoryStick, HardDrive, Globe,
   Database, Boxes, Zap, Clock, Network, MonitorCog, Info, AppWindow,
   TrendingUp, AlertTriangle, ChevronDown, Calendar, Activity,
+  Shield, Archive, Layers, Wrench,
 } from "lucide-react";
 import {
   ResponsiveContainer, AreaChart, Area, XAxis, YAxis, Tooltip, CartesianGrid,
@@ -309,6 +310,153 @@ function ServerTrend({ server, snapshots }) {
   );
 }
 
+/* ── Sections structurées ITCare : volumes, snapshots, patch, backup ── */
+function ServerStructuredSections({ server }) {
+  const extraMap = Object.fromEntries((server.extra || []).map(e => [e.label, e.value]));
+
+  /* Parse JSON sécurisé */
+  const parseJson = (key) => { try { return JSON.parse(extraMap[key] || "null"); } catch { return null; } };
+
+  const volumes   = parseJson("_Volumes");    /* [{mount, total, used, free, pct}] */
+  const snapshots = parseJson("_Snapshots");  /* [{name, date, size, desc}] */
+
+  const patchLast    = extraMap["Dernière Patch Party"];
+  const patchTag     = extraMap["Patch Tag"];
+  const patchGroup   = extraMap["Groupe Patch"];
+  const patchExcluded = extraMap["Patch Exclu"];
+  const backupLast      = extraMap["Dernière Sauvegarde"];
+  const backupSize      = extraMap["Stockage Sauvegarde"];
+  const backupRetention = extraMap["Rétention Sauvegarde"];
+  const backupSystem    = extraMap["Système Sauvegarde"];
+  const storageConfigured = extraMap["Stockage Configuré"];
+  const storageUsed       = extraMap["Stockage Utilisé"];
+
+  const hasPatch   = patchLast || patchGroup;
+  const hasBackup  = backupLast || backupSize;
+  const hasVolumes = volumes?.length > 0;
+  const hasSnaps   = snapshots?.length > 0;
+
+  if (!hasPatch && !hasBackup && !hasVolumes && !hasSnaps) return null;
+
+  const sectionHdr = (icon, label, color) => (
+    <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 10, fontWeight: 700, color, textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: 8, marginTop: 18, paddingTop: 12, borderTop: "1px solid rgba(255,255,255,0.06)" }}>
+      {icon} {label}
+    </div>
+  );
+
+  const fmtDate = (d) => {
+    if (!d) return "—";
+    try { return new Date(d).toLocaleDateString("fr-FR", { day: "2-digit", month: "short", year: "numeric" }); }
+    catch { return d; }
+  };
+
+  const fmtGb = (v) => v != null ? (v >= 1024 ? `${(v/1024).toFixed(1)} To` : `${v} Go`) : null;
+
+  return (
+    <>
+      {/* ── Patch Party ── */}
+      {hasPatch && (
+        <div>
+          {sectionHdr(<Wrench size={11} />, "Patch Party", "#A78BFA")}
+          <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+            {[
+              { label: "Dernière",  value: patchTag ? `${fmtDate(patchLast)} (${patchTag})` : fmtDate(patchLast), color: "#9CA3AF" },
+              { label: "Statut",    value: patchExcluded ? `Exclue${patchExcluded !== "Oui" ? " — " + patchExcluded : ""}` : (patchLast ? "✓ Patchée" : ""), color: patchExcluded ? "#FBBF24" : "#34D399" },
+              { label: "Groupe",    value: patchGroup, color: "#C4B5FD" },
+            ].filter(r => r.value && r.value !== "—").map(({ label, value, color }) => (
+              <div key={label} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", background: "rgba(167,139,250,0.06)", border: "1px solid rgba(167,139,250,0.15)", borderRadius: 8, padding: "6px 10px" }}>
+                <span style={{ fontSize: 10, color: "#6B7280", fontWeight: 600 }}>{label}</span>
+                <span style={{ fontSize: 11, color, fontFamily: "'JetBrains Mono', monospace", fontWeight: 600 }}>{value}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* ── Backup ── */}
+      {hasBackup && (
+        <div>
+          {sectionHdr(<Archive size={11} />, "Sauvegarde", "#34D399")}
+          <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+            {[
+              { label: "Dernière",  value: fmtDate(backupLast) },
+              { label: "Stockage",  value: backupSize },
+              { label: "Rétention", value: backupRetention },
+              { label: "Système",   value: backupSystem },
+            ].filter(r => r.value && r.value !== "—").map(({ label, value }) => (
+              <div key={label} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", background: "rgba(52,211,153,0.06)", border: "1px solid rgba(52,211,153,0.15)", borderRadius: 8, padding: "6px 10px" }}>
+                <span style={{ fontSize: 10, color: "#6B7280", fontWeight: 600 }}>{label}</span>
+                <span style={{ fontSize: 11, color: "#34D399", fontFamily: "'JetBrains Mono', monospace", fontWeight: 600 }}>{value}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* ── Volumes / Points de montage ── */}
+      {hasVolumes && (
+        <div>
+          {sectionHdr(<Layers size={11} />, `Volumes (${volumes.length})`, "#FBBF24")}
+          {(storageConfigured || storageUsed) && (() => {
+            const usedNum = parseFloat(storageUsed) || 0;
+            const cfgNum  = parseFloat(storageConfigured) || 0;
+            const gPct = cfgNum ? Math.round((usedNum / cfgNum) * 100) : null;
+            const gColor = gPct == null ? "#6B7280" : gPct >= 90 ? "#F87171" : gPct >= 75 ? "#FB923C" : gPct >= 50 ? "#FBBF24" : "#34D399";
+            return (
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 8, padding: "6px 10px", marginBottom: 6 }}>
+                <span style={{ fontSize: 10, color: "#9CA3AF" }}>{storageUsed} sur {storageConfigured} configuré</span>
+                {gPct != null && <span style={{ fontSize: 11, fontWeight: 800, color: gColor, fontFamily: "'JetBrains Mono', monospace" }}>{gPct}%</span>}
+              </div>
+            );
+          })()}
+          <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+            {volumes.map((v, i) => {
+              const pct = v.pct != null ? v.pct : (v.total && v.used != null ? Math.round((v.used / v.total) * 100) : null);
+              const pctColor = pct == null ? "#6B7280" : pct >= 90 ? "#F87171" : pct >= 75 ? "#FB923C" : pct >= 50 ? "#FBBF24" : "#34D399";
+              return (
+                <div key={i} style={{ background: "rgba(251,191,36,0.05)", border: "1px solid rgba(251,191,36,0.15)", borderRadius: 8, padding: "8px 10px" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+                    <span style={{ fontSize: 11, color: "#FBBF24", fontWeight: 700, fontFamily: "'JetBrains Mono', monospace" }}>{v.mount || `Volume ${i + 1}`}</span>
+                    {pct != null && <span style={{ fontSize: 11, fontWeight: 800, color: pctColor, fontFamily: "'JetBrains Mono', monospace" }}>{pct}%</span>}
+                  </div>
+                  {pct != null && (
+                    <div style={{ height: 5, background: "rgba(255,255,255,0.07)", borderRadius: 3, overflow: "hidden", marginBottom: 6 }}>
+                      <div style={{ width: `${pct}%`, height: "100%", background: pctColor, borderRadius: 3, transition: "width 0.4s" }} />
+                    </div>
+                  )}
+                  <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+                    {v.total != null && <span style={{ fontSize: 10, color: "#9CA3AF" }}>Total: <b style={{ color: "#E5E7EB" }}>{fmtGb(v.total)}</b></span>}
+                    {v.used  != null && <span style={{ fontSize: 10, color: "#9CA3AF" }}>Utilisé: <b style={{ color: pctColor }}>{fmtGb(v.used)}</b></span>}
+                    {v.free  != null && <span style={{ fontSize: 10, color: "#9CA3AF" }}>Libre: <b style={{ color: "#34D399" }}>{fmtGb(v.free)}</b></span>}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* ── Snapshots ── */}
+      {hasSnaps && (
+        <div>
+          {sectionHdr(<Shield size={11} />, `Snapshots (${snapshots.length})`, "#60A5FA")}
+          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+            {snapshots.map((s, i) => (
+              <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, background: "rgba(96,165,250,0.05)", border: "1px solid rgba(96,165,250,0.15)", borderRadius: 8, padding: "6px 10px" }}>
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ fontSize: 11, color: "#60A5FA", fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.name || `Snapshot ${i + 1}`}</div>
+                  {s.date && <div style={{ fontSize: 9, color: "#4B5563", marginTop: 1 }}>{fmtDate(s.date)}</div>}
+                </div>
+                {s.size != null && <span style={{ fontSize: 10, color: "#9CA3AF", flexShrink: 0, fontFamily: "'JetBrains Mono', monospace" }}>{fmtGb(s.size)}</span>}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
 /* ── Panneau de détail ── */
 export function ServerDetail({ server, snapshots, onClose, width = 360, overrideStyle = {} }) {
   const [extraOpen, setExtraOpen] = useState(false);
@@ -375,8 +523,11 @@ export function ServerDetail({ server, snapshots, onClose, width = 360, override
       {/* Tendance */}
       <ServerTrend server={server} snapshots={snapshots} />
 
+      {/* ── Sections structurées : volumes, snapshots, patch, backup ── */}
+      <ServerStructuredSections server={server} />
+
       {/* Colonnes supplémentaires importées (Excel / API) */}
-      {server.extra?.length > 0 && (
+      {server.extra?.filter(e => !e.label.startsWith('_')).length > 0 && (
         <div style={{ marginTop: 18 }}>
           <div
             onClick={() => setExtraOpen(o => !o)}
@@ -384,13 +535,13 @@ export function ServerDetail({ server, snapshots, onClose, width = 360, override
           >
             <span style={{ display: "flex", alignItems: "center", gap: 5 }}>
               <Info size={11} /> Informations complémentaires
-              <span style={{ fontSize: 9, color: "#4B5563", fontWeight: 400, textTransform: "none", letterSpacing: 0 }}>({server.extra.length})</span>
+              <span style={{ fontSize: 9, color: "#4B5563", fontWeight: 400, textTransform: "none", letterSpacing: 0 }}>({server.extra.filter(e => !e.label.startsWith('_')).length})</span>
             </span>
             <ChevronDown size={12} color="#4B5563" style={{ transform: extraOpen ? "rotate(180deg)" : "none", transition: "transform 0.2s" }} />
           </div>
           {extraOpen && (
             <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
-              {server.extra.map(({ label, value }) => (
+              {server.extra.filter(e => !e.label.startsWith('_')).map(({ label, value }) => (
                 <div key={label} style={{
                   display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10,
                   background: "rgba(99,102,241,0.05)", border: "1px solid rgba(99,102,241,0.15)",

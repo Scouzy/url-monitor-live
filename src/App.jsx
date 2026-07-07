@@ -12,7 +12,7 @@ import ExcelImport from "./components/ExcelImport";
 import IncidentLog, { loadLog, addIncident, IncidentLogPage } from "./components/IncidentLog";
 import ServersView from "./components/ServersView";
 import CapacityPlanning from "./components/CapacityPlanning";
-import ServerImport from "./components/ServerImport";
+import ServerImport, { itcareToRow, API_LS_KEY as ITCARE_LS_KEY } from "./components/ServerImport";
 import TodoList from "./components/TodoList";
 import WorkflowEditor from "./components/WorkflowEditor";
 import AppImpactMap from "./components/AppImpactMap";
@@ -21,7 +21,7 @@ import VpsAgentsConfig from "./components/VpsAgentsConfig";
 import AgentDeployMass from "./components/AgentDeployMass";
 import SettingsPage from "./components/SettingsPage";
 import DashboardPage from "./components/DashboardPage";
-import { subscribeServers, getServers, recommendations as getRecos, patchServerMetrics } from "./utils/servers";
+import { subscribeServers, getServers, setServers, getServersMeta, recommendations as getRecos, patchServerMetrics } from "./utils/servers";
 import { loadVpsAgents, fetchVpsMetrics, setAgentMetrics, setAgentError, subscribeAgents, getAllAgentMetrics } from "./utils/vpsAgents";
 import { loadCapacitySettings, saveCapacitySettings } from "./utils/capacitySettings";
 import { loadTodos } from "./utils/todoStorage";
@@ -55,6 +55,42 @@ export default function App() {
   const [todoBadge, setTodoBadge] = useState(() => loadTodos().filter(t => t.status !== "done").length);
 
   useEffect(() => { localStorage.setItem("g1oeil_module", activeModule); }, [activeModule]);
+
+  /* ── Auto-refresh ITCare (mode client credentials uniquement, toutes les 30 min) ──
+     Actualise automatiquement les données si clientId + clientSecret sont mémorisés.
+     Pour le mode token de session : pas de refresh auto (token non renouvelable). */
+  const ITCARE_LAST_REFRESH = "capacity-itcare-last-refresh";
+  const ITCARE_INTERVAL_MS  = 30 * 60 * 1000; // 30 minutes
+  useEffect(() => {
+    async function doItcareRefresh() {
+      if (getServersMeta().source !== "api") return;
+      let config = null;
+      try { config = JSON.parse(localStorage.getItem(ITCARE_LS_KEY)); } catch {}
+      if (!config?.clientId || !config?.clientSecret || config.authMode !== "credentials") return;
+      try {
+        const res = await fetch("/api/itcare", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ clientId: config.clientId, clientSecret: config.clientSecret }),
+        });
+        if (!res.ok) return;
+        const json = await res.json();
+        const rawList = json.servers || json.data || json.items || [];
+        if (!rawList.length) return;
+        setServers(rawList.map(itcareToRow), "api", "ITCare");
+        localStorage.setItem(ITCARE_LAST_REFRESH, String(Date.now()));
+        console.log("✅ [ITCare] Auto-refresh : " + rawList.length + " serveurs mis à jour.");
+      } catch (e) {
+        console.warn("⚠️ [ITCare] Auto-refresh échoué :", e.message);
+      }
+    }
+    /* Refresh initial si données > 30 min ou jamais chargées */
+    const lastTs = parseInt(localStorage.getItem(ITCARE_LAST_REFRESH) || "0");
+    if (Date.now() - lastTs > ITCARE_INTERVAL_MS) {
+      setTimeout(doItcareRefresh, 4000); /* délai 4s pour laisser l'app s'initialiser */
+    }
+    const id = setInterval(doItcareRefresh, ITCARE_INTERVAL_MS);
+    return () => clearInterval(id);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   /* ── Polling automatique des agents VPS (toutes les 60s) ── */
   useEffect(() => {

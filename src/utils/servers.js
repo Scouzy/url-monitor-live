@@ -160,11 +160,14 @@ const num = (v, fallback = 0) => {
 function formatDate(raw) {
   if (raw == null || raw === "") return null;
   const s = String(raw).trim();
-  const n = parseFloat(s);
-  if (Number.isFinite(n) && n > 1000) {
-    /* Nombre série Excel : jours depuis 1900-01-01 (ajustement 25569 jours vers epoch Unix) */
-    const d = new Date((n - 25569) * 86400 * 1000);
-    if (!isNaN(d.getTime())) return d.toLocaleDateString("fr-FR");
+  /* Numéro série Excel UNIQUEMENT si la chaîne est purement numérique (pas "2020-01-15T…") */
+  if (/^\d+(\.\d+)?$/.test(s)) {
+    const n = parseFloat(s);
+    if (Number.isFinite(n) && n > 1000) {
+      /* Jours depuis 1900-01-01 → ajustement 25569 jours vers epoch Unix */
+      const d = new Date((n - 25569) * 86400 * 1000);
+      if (!isNaN(d.getTime())) return d.toLocaleDateString("fr-FR");
+    }
   }
   const d = new Date(s);
   if (!isNaN(d.getTime())) return d.toLocaleDateString("fr-FR");
@@ -293,6 +296,34 @@ let _cache = null;
 let _meta = { source: "demo", loadedAt: null, label: null };
 const _listeners = new Set();
 
+/* ── Injecte les dernières métriques connues (snapshot) dans les lignes brutes ──
+   Utilisé avant normalizeServer pour éviter l'affichage des défauts 30/40/35
+   quand le monitoring temps-réel n'était pas disponible au dernier chargement.
+   Concerne UNIQUEMENT la source "api" (ITCare). */
+function applyMetricsFallback(rows, source) {
+  if (source !== "api") return rows;
+  const snaps = loadSnapshots();
+  if (snaps.length === 0) return rows;
+  /* Construire un index nom → dernières métriques (du plus récent au plus ancien) */
+  const lastKnown = {};
+  for (let i = snaps.length - 1; i >= 0; i--) {
+    for (const [name, vals] of Object.entries(snaps[i].servers || {})) {
+      if (!lastKnown[name]) lastKnown[name] = vals;
+    }
+  }
+  if (Object.keys(lastKnown).length === 0) return rows;
+  return rows.map(r => {
+    const srvName = r.Name || r.name || r.Nom || r.nom || "";
+    const prev = srvName ? lastKnown[srvName] : null;
+    if (!prev) return r;
+    const patch = {};
+    if (r["Utilisation CPU"]    === undefined && prev.cpu  != null) patch["Utilisation CPU"]    = prev.cpu;
+    if (r["Utilisation RAM"]    === undefined && prev.ram  != null) patch["Utilisation RAM"]    = prev.ram;
+    if (r["Utilisation Disque"] === undefined && prev.disk != null) patch["Utilisation Disque"] = prev.disk;
+    return Object.keys(patch).length > 0 ? { ...r, ...patch } : r;
+  });
+}
+
 function loadPersisted() {
   try {
     const raw = localStorage.getItem(LS_KEY);
@@ -302,8 +333,8 @@ function loadPersisted() {
     const rows = parsed.rows || parsed.servers;
     if (!Array.isArray(rows) || rows.length === 0) return null;
     _meta = parsed.meta || { source: "excel", loadedAt: null, label: null };
-    /* Re-normalisation complète : séries et colonnes extra regénérées depuis les données d'origine */
-    return rows.map((s, i) => normalizeServer(s, i));
+    /* Re-normalisation + fallback métriques depuis snapshot (évite les défauts 30/40/35) */
+    return applyMetricsFallback(rows, _meta.source).map((s, i) => normalizeServer(s, i));
   } catch { return null; }
 }
 
@@ -315,13 +346,22 @@ export function getServers() {
 export function getServersMeta() { return _meta; }
 
 export function setServers(rawList, source, label) {
-  const servers = rawList.map((r, i) => normalizeServer(r, i));
+  const servers = applyMetricsFallback(rawList, source).map((row, i) => normalizeServer(row, i));
+
   if (servers.length === 0) throw new Error("Aucun serveur valide");
   _cache = servers;
   _meta = { source, loadedAt: Date.now(), label: label || null };
   try {
-    /* Lignes brutes persistées : toutes les colonnes d'origine sont conservées */
-    localStorage.setItem(LS_KEY, JSON.stringify({ rows: rawList, meta: _meta }));
+    /* Persister les lignes enrichies avec les métriques actuellement affichées.
+       "Utilisation CPU/RAM/Disque" → toFlat → "utilisationcpu/ram/disque" → pick() dans normalizeServer.
+       Garantit que le reload de page restaure exactement les valeurs visibles à l'écran,
+       sans dépendre du snapshot ni risquer de retomber sur les défauts 30/40/35. */
+    const persistRows = rawList.map((r, i) => {
+      const s = servers[i];
+      if (!s) return r;
+      return { ...r, "Utilisation CPU": s.cpu, "Utilisation RAM": s.ram, "Utilisation Disque": s.disk };
+    });
+    localStorage.setItem(LS_KEY, JSON.stringify({ rows: persistRows, meta: _meta }));
   } catch { /* quota */ }
   /* Snapshot horodaté pour le suivi de tendance (hors mode démo) */
   saveSnapshot(servers, source, label);

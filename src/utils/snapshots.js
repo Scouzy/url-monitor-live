@@ -5,7 +5,7 @@
  * ─────────────────────────────────────────────────────────────────────────── */
 
 const SNAP_KEY  = "capacity-snapshots";
-const MAX_SNAPS = 30; /* 30 chargements max conservés */
+const MAX_SNAPS = 365; /* 365 jours max — 1 snapshot/jour = 1 an de suivi */
 
 /* ── Régression linéaire (moindres carrés) ── */
 function linReg(pts) {
@@ -38,7 +38,11 @@ export function clearSnapshots() {
  */
 export function saveSnapshot(servers, source, label) {
   if (source === "demo") return; /* Ne pas tracer les données de démo */
-  const snaps = loadSnapshots();
+  /* 1 seul snapshot par jour : remplace les snapshot(s) existants du jour courant.
+     Cela élimine les mesures aux valeurs par défaut (30/40/35) sauvegardées avant
+     que les données réelles arrivent, et assure un suivi cohérent jour après jour. */
+  const todayStr = new Date().toDateString();
+  const snaps = loadSnapshots().filter(s => new Date(s.ts).toDateString() !== todayStr);
   const entry = {
     ts:     Date.now(),
     source,
@@ -112,7 +116,10 @@ export function buildTrendChartData(serverName, snapshots) {
     const r = regs[metric];
     if (!r) return null;
     const v = r.slope * (lastDays + daysAhead) + r.intercept;
-    return Math.min(100, Math.max(0, Math.round(v * 10) / 10));
+    /* Plancher = valeur du dernier snapshot : la projection ne peut pas descendre sous le niveau actuel.
+       Ceci évite les projections artificiellement à 0% causées par la transition défauts→vraies valeurs. */
+    const current = pts[pts.length - 1][metric] ?? 0;
+    return Math.min(100, Math.max(current, Math.round(v * 10) / 10));
   }
 
   /* Formateur de date court */

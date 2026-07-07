@@ -26,9 +26,14 @@ function parseAppName(serviceName, cloudName, environment) {
   if (!serviceName) return "";
   const parts = serviceName.split(" - ").map(s => s.trim());
   if (parts.length < 2) return serviceName;
-  const firstMatch = cloudName && parts[0].toUpperCase() === cloudName.trim().toUpperCase();
-  const lastMatch  = environment && parts[parts.length - 1].toUpperCase() === environment.trim().toUpperCase();
-  const middle = parts.slice(firstMatch ? 1 : 0, lastMatch ? -1 : undefined);
+  /* Normalisation accents + casse : "France Compétences" === "FRANCE COMPETENCES" */
+  const norm = s => s.trim().toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  const firstMatch = cloudName && norm(parts[0]) === norm(cloudName);
+  const lastMatch  = environment && norm(parts[parts.length - 1]) === norm(environment);
+  /* Heuristique : 3 parties + dernier = environnement connu → la 1ère est un préfixe organisation
+     (couvre le cas cloudName = null ou sans accent correspondant) */
+  const skipFirst = firstMatch || (parts.length >= 3 && lastMatch);
+  const middle = parts.slice(skipFirst ? 1 : 0, lastMatch ? -1 : undefined);
   return middle.join(" - ") || serviceName;
 }
 
@@ -37,7 +42,11 @@ function parseAppName(serviceName, cloudName, environment) {
    category | cloudId | cloudName | comment | creationTime | creationUser |
    environment | family | id | internalResourceId | name | path | productName |
    resourceType | serviceId | serviceName | status | supportLevel | supportPhase | type
-   + champs enrichis via GET /compute/resources/{id} : ip, cpu, ram, disk (si dispo)
+   + champs enrichis via GET /compute/instances/{internalResourceId} (confirmé DevTools) :
+     ram, cpu, storage, ipAddress, backup{backupSystem,size,type,lastDate},
+     backupPolicyDetails{backups,policies}, patchParty{patchGroup,patchDate,patchTag,excluded}
+   + GET .../storage → _storage{fileSystems,totalSizeFileSystems,totalSizeDisks}
+   + GET .../snapshots → _snapshots[]
 ── */
 function itcareToRow(r) {
   const path = String(r.path || "");
@@ -82,7 +91,8 @@ function itcareToRow(r) {
   /* ── CPU ──
      `r.cpu` = nb vCPU confirmé (ex: 2) ── */
   const cores  = firstOf(r.cpu, r.cpuCount, r.vcpuCount, r.vcpu, r.cores, r.nbCpu, r.numberOfCpu);
-  const cpuPct = firstOf(r.cpuUsage, r.cpuPercent, r.cpuLoad, r.cpuUtilization);
+  /* CPU% temps réel — confirmé via GET /monitoring/resources/{id}/chart?graph-name=SYS_LNX_CPU_USAGE → r._monitoring.cpuPct */
+  const cpuPct = firstOf(r._monitoring?.cpuPct, r.cpuUsage, r.cpuPercent, r.cpuLoad, r.cpuUtilization);
 
   /* ── RAM (Go) ──
      `r.ram` = Go confirmé (ex: 8) ── */
@@ -91,7 +101,9 @@ function itcareToRow(r) {
     const mb = firstOf(r.memoryMb, r.memoryMB, r.memory, r.totalMemory, r.memorySize, r.ramMb);
     if (mb != null) ramGb = mb > 1000 ? mbToGb(mb) : mb;
   }
-  const ramPct = firstOf(r.memoryUsage, r.ramUsage, r.memoryPercent, r.ramPercent);
+  /* RAM% temps réel — confirmé via GET /monitoring/resources/{id}/chart?graph-name=SYS_LNX_MEMORY_USAGE → r._monitoring.ramPct (used_prct) */
+  const ramPct    = firstOf(r._monitoring?.ramPct, r.memoryUsage, r.ramUsage, r.memoryPercent, r.ramPercent);
+  const ramUsedGb = r._monitoring?.ramUsedGb;
 
   /* ── Stockage (Go) ──
      `r.storage` et `r.totalSizeDisks` confirmés dans la liste ── */
@@ -116,24 +128,76 @@ function itcareToRow(r) {
      - "Stockage%" → flat key "stockage" (même collision)
      - CPU null → fallback 30% dans normalizeServer → affichage trompeur
      Aucune métrique d'usage n'est disponible via l'API ITCare. */
-  /* ── Backup ── */
-  const backupStatus = String(r.backupStatus != null ? (r.backupStatus ? "Oui" : "Non") : "");
-  const backupPolicy = r.backupPolicyDetails?.backups?.length
-    ? r.backupPolicyDetails.backups.map(b => b.type || "").filter(Boolean).join(", ")
-    : "";
+  /* ── Backup — confirmé via GET /compute/instances/{id} → r.backup + r.backupPolicyDetails ── */
+  const backupStatus  = String(r.backupStatus != null ? (r.backupStatus ? "Oui" : "Non") : "");
+  const backupObj      = r.backup || {};
+  const lastBackupDate = backupObj.lastDate || "";
+  const backupStorageGb = backupObj.size != null ? backupObj.size : null;
+  const backupSystem   = backupObj.backupSystem || "";
+  const bkPolicy        = (r.backupPolicyDetails?.policies || [])[0] || {};
+  const backupPolicyLabel = bkPolicy.label || bkPolicy.name || (r.backupPolicyDetails?.backups?.length
+    ? r.backupPolicyDetails.backups.map(b => b.type || "").filter(Boolean).join(", ") : "");
+  const backupRetentionDays = Object.values(bkPolicy.frequencies || {})[0]?.retention;
+
+  /* ── Patch party — confirmé via GET /compute/instances/{id} → r.patchParty ── */
+  const patch = r.patchParty || {};
+  const patchLastDate      = patch.patchDate || "";
+  const patchTag           = patch.patchTag || "";
+  const patchGroup         = patch.patchGroup ? `Groupe ${patch.patchGroup}` : "";
+  const patchExcluded      = patch.excluded === true;
+  const patchExclusionReason = patch.exclusionReason || "";
+
+  /* ── Stockage détaillé — confirmé via GET /compute/instances/{id}/storage → r._storage ── */
+  const fileSystems = r._storage?.fileSystems || [];
+  const volumesJson = fileSystems.length > 0 ? JSON.stringify(fileSystems.map(fs => {
+    const total = fs.sizeOf, free = fs.free;
+    const used  = (total != null && free != null) ? Math.round((total - free) * 100) / 100 : null;
+    const pct   = (total && used != null) ? Math.round((used / total) * 100) : null;
+    return { mount: fs.mountingPoint || "", total, used, free, pct };
+  })) : "";
+  const storageConfiguredGb = r._storage?.totalSizeFileSystems;
+  const storageUsedGb = fileSystems.length > 0
+    ? Math.round(fileSystems.reduce((s, fs) => s + (fs.sizeOf - fs.free), 0) * 100) / 100
+    : null;
+
+  /* ── Utilisation Disque (%) — Windows : volume C: | Linux : total global (sum used / sum total) ── */
+  const isWindows = /windows/i.test(osType) || /windows/i.test(path);
+  let diskUsagePct = null;
+  if (fileSystems.length > 0) {
+    const pctOf = (fs) => (fs.sizeOf ? Math.round(((fs.sizeOf - fs.free) / fs.sizeOf) * 100) : null);
+    if (isWindows) {
+      const cDrive = fileSystems.find(fs => /^c[:\\/]*$/i.test(String(fs.mountingPoint || "").trim()));
+      diskUsagePct = cDrive ? pctOf(cDrive) : pctOf(fileSystems[0]);
+    } else {
+      /* Linux : total global = (sum sizeOf - sum free) / sum sizeOf
+         = la barre agrégée affichée en haut de la section Volumes (ex: 418.99/626.66 → 67%) */
+      const totalSizeOf = fileSystems.reduce((s, fs) => s + (fs.sizeOf || 0), 0);
+      const totalFree   = fileSystems.reduce((s, fs) => s + (fs.free   || 0), 0);
+      diskUsagePct = totalSizeOf > 0 ? Math.round(((totalSizeOf - totalFree) / totalSizeOf) * 100) : null;
+    }
+  }
+
+  /* ── Snapshots — confirmé via GET /compute/instances/{id}/snapshots → r._snapshots ── */
+  const snapArr = Array.isArray(r._snapshots) ? r._snapshots : [];
+  const snapshotsJson = snapArr.length > 0 ? JSON.stringify(snapArr.map(s => ({
+    name: firstOf(s.name, s.description, s.id) || "",
+    date: firstOf(s.createdAt, s.creationDate, s.creationTime, s.date) || "",
+    size: firstOf(s.sizeGb, s.diskSizeGb, s.storageSizeGb, s.size),
+    desc: firstOf(s.description, s.comment) || "",
+  }))) : "";
 
   return {
     Name:            r.name || String(r.id || ""),
-    Type:            displayLabel || osType || "Unknown",  /* prettyLabel > family */
+    Type:            displayLabel || osType || "Unknown",
     Statut:          statut,
-    Cores:           cores != null ? String(cores) : null, /* "cores" → coresVal  (vCPU) */
-    RAM:             ramGb,                                /* "ram"   → ramGbVal  (Go)   */
-    Stockage:        diskGb,                               /* "stockage" → diskGbVal (Go) */
+    Cores:           cores != null ? String(cores) : null,
+    RAM:             ramGb,
+    Stockage:        diskGb,
     IP:              ip || "",
-    Service:         service,                              /* app parsé de serviceName */
+    Service:         service,
     Environnement:   String(r.environment || ""),
     Datacenter:      datacenter,
-    /* --- colonnes extra (visibles dans le détail du serveur) --- */
+    /* --- infos OS / infra --- */
     "OS Family":     osType,
     "Resource Type": String(r.resourceType || r.type || ""),
     Category:        String(r.category || ""),
@@ -144,8 +208,28 @@ function itcareToRow(r) {
     "ServiceKey":    String(r.serviceKey || ""),
     "Total Disques": r.totalSizeDisks != null ? String(r.totalSizeDisks) : "",
     "Réplication":   String(r.replicationStatus || ""),
-    "Backup":        backupStatus,
-    "Backup Policy": backupPolicy,
+    ...((diskUsagePct ?? diskPct) != null ? { "Utilisation Disque": diskUsagePct ?? diskPct } : {}),
+    ...(cpuPct != null ? { "Utilisation CPU": cpuPct } : {}),
+    ...(ramPct != null ? { "Utilisation RAM": ramPct } : {}),
+    ...(ramUsedGb != null ? { "RAM Consommée": `${ramUsedGb} Go` } : {}),
+    /* --- backup --- */
+    "Backup":              backupStatus,
+    ...(backupPolicyLabel  ? { "Backup Policy":        backupPolicyLabel } : {}),
+    ...(lastBackupDate     ? { "Dernière Sauvegarde":  lastBackupDate } : {}),
+    ...(backupStorageGb != null ? { "Stockage Sauvegarde":  `${backupStorageGb} Go` } : {}),
+    ...(backupRetentionDays ? { "Rétention Sauvegarde": `${backupRetentionDays} jours` } : {}),
+    ...(backupSystem       ? { "Système Sauvegarde":    backupSystem } : {}),
+    /* --- patch party --- */
+    ...(patchLastDate ? { "Dernière Patch Party": patchLastDate } : {}),
+    ...(patchTag      ? { "Patch Tag":            patchTag }      : {}),
+    ...(patchGroup    ? { "Groupe Patch":          patchGroup }   : {}),
+    ...(patchExcluded ? { "Patch Exclu":           patchExclusionReason || "Oui" } : {}),
+    /* --- stockage détaillé (JSON) --- */
+    ...(storageConfiguredGb != null ? { "Stockage Configuré": `${storageConfiguredGb} Go` } : {}),
+    ...(storageUsedGb       != null ? { "Stockage Utilisé":   `${storageUsedGb} Go` } : {}),
+    ...(volumesJson   ? { "_Volumes":   volumesJson }   : {}),
+    ...(snapshotsJson ? { "_Snapshots": snapshotsJson } : {}),
+    /* --- dates --- */
     creationTime:    r.creationTime || "",
     "ITCare Path":   path,
     "ITCare ID":     String(r.id || ""),
@@ -515,3 +599,6 @@ export default function ServerImport() {
     </div>
   );
 }
+
+/* ── Exports pour l'auto-refresh dans App.jsx ── */
+export { itcareToRow, API_LS_KEY };
