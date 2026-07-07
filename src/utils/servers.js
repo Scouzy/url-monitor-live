@@ -343,7 +343,12 @@ function loadPersisted() {
 function dedupeByName(list) {
   const map = new Map();
   list.forEach(s => map.set((s.name || s.Name || s.nom || "").toLowerCase().trim(), s));
-  return [...map.values()];
+  const byName = [...map.values()];
+  /* Passe secondaire : éliminer les doublons d'id (ex. deux vps-my-vps avec des noms légèrement différents) */
+  const idMap = new Map();
+  const noId  = [];
+  byName.forEach(s => s.id ? idMap.set(s.id, s) : noId.push(s));
+  return [...idMap.values(), ...noId];
 }
 
 export function getServers() {
@@ -445,7 +450,8 @@ export function patchServerMetrics(name, metrics) {
   };
 
   const nameKey = name.trim().toLowerCase();
-  const idx = _cache.findIndex(s => s.name.toLowerCase() === nameKey);
+  const idKey   = `vps-${metrics.hostname || name}`;
+  const idx = _cache.findIndex(s => s.name.toLowerCase() === nameKey || s.id === idKey);
   if (idx >= 0) {
     const growthRate = _cache[idx].growthRate || defGrow;
     const { history24h, monthly } = buildSeries(base, growthRate, strSeed(name));

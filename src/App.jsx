@@ -143,9 +143,10 @@ export default function App() {
         }
       }
     };
+    console.log(`\u25b6 [VPS Poll] Démarrage polling — intervalle : ${agentInterval}s`);
     poll();
-    const id = setInterval(poll, agentInterval * 1000);
-    return () => clearInterval(id);
+    const id = setInterval(() => { console.log(`\u23f1 [VPS Poll] Tick (${agentInterval}s)`); poll(); }, agentInterval * 1000);
+    return () => { console.log(`\u23f9 [VPS Poll] Arrêt (changement intervalle → nouveau : ${agentInterval}s)`); clearInterval(id); };
   }, [agentInterval]);
   useEffect(() => { localStorage.setItem("g1oeil_tab", mainTab); }, [mainTab]);
 
