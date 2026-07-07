@@ -49,6 +49,7 @@ export default function App() {
   const [mainTab, setMainTab] = useState(() => localStorage.getItem("g1oeil_tab") || "surveillance");
   const [activeModule, setActiveModule] = useState(() => localStorage.getItem("g1oeil_module") || "dashboard");
   const [serverSubTab, setServerSubTab] = useState("inventory");
+  const [agentInterval, setAgentInterval] = useState(() => parseInt(localStorage.getItem("g1oeil_agent_interval") || "30"));
   const [notifEnabled, setNotifEnabled] = useState(() => typeof Notification !== "undefined" && Notification.permission === "granted");
   const [capacitySettings, setCapacitySettings] = useState(() => loadCapacitySettings());
   const allServers    = useSyncExternalStore(subscribeServers, getServers);
@@ -128,7 +129,7 @@ export default function App() {
     return () => clearInterval(id);
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  /* ── Polling automatique des agents VPS (toutes les 60s) ── */
+  /* ── Polling automatique des agents VPS (intervalle configurable) ── */
   useEffect(() => {
     const poll = async () => {
       const agents = loadVpsAgents().filter(a => a.enabled);
@@ -143,9 +144,9 @@ export default function App() {
       }
     };
     poll();
-    const id = setInterval(poll, 60_000);
+    const id = setInterval(poll, agentInterval * 1000);
     return () => clearInterval(id);
-  }, []);
+  }, [agentInterval]);
   useEffect(() => { localStorage.setItem("g1oeil_tab", mainTab); }, [mainTab]);
 
   useEffect(() => {
@@ -545,7 +546,21 @@ export default function App() {
               </p>
               </div>
             </div>
-            {activeModule === "servers" && serverSubTab === "inventory" && <ServerImport />}
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              {activeModule === "servers" && (
+                <div style={{
+                  display: "flex", alignItems: "center", gap: 7, padding: "5px 12px", borderRadius: 9,
+                  background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.06)",
+                }}>
+                  <span style={{ fontSize: 11, color: "#9CA3AF" }}>Serveurs</span>
+                  <select value={agentInterval} onChange={e => { const v = +e.target.value; setAgentInterval(v); localStorage.setItem("g1oeil_agent_interval", String(v)); }}
+                    style={{ background: "transparent", border: "none", color: "#E5E7EB", fontSize: 12, fontFamily: "'JetBrains Mono', monospace", cursor: "pointer" }}>
+                    {[10, 15, 30, 60, 120, 300].map(v => <option key={v} value={v} style={{ background: "#1F2937" }}>{v < 60 ? `${v}s` : `${v/60}min`}</option>)}
+                  </select>
+                </div>
+              )}
+              {activeModule === "servers" && serverSubTab === "inventory" && <ServerImport />}
+            </div>
           </header>
           {/* Sous-onglets Serveurs */}
           {activeModule === "servers" && (
