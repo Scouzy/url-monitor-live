@@ -169,16 +169,10 @@ export default function DashboardPage({ groups = [], allUrls = [], allServers = 
   incidentLog.filter(e => e.type === "offline").forEach(e => { incidentsByUrl[e.url] = (incidentsByUrl[e.url] || 0) + 1; });
   const topIncidents = Object.entries(incidentsByUrl).sort((a, b) => b[1] - a[1]).slice(0, 5);
 
-  /* Top 5 par métrique — serveurs live (agent) prioritaires, démo en dernier */
-  const sortTop5 = (key) => [...allServers].sort((a, b) => {
-    const liveA = a.lastVpsCheck ? 1 : 0;
-    const liveB = b.lastVpsCheck ? 1 : 0;
-    if (liveB !== liveA) return liveB - liveA; /* live d'abord */
-    const demoA = a.source === "demo" ? 0 : 1;
-    const demoB = b.source === "demo" ? 0 : 1;
-    if (demoB !== demoA) return demoB - demoA; /* démo en dernier */
-    return (b[key] ?? 0) - (a[key] ?? 0);
-  }).slice(0, 5);
+  /* Top 5 par métrique — classement purement par valeur décroissante */
+  const sortTop5 = (key) => [...allServers]
+    .sort((a, b) => (b[key] ?? 0) - (a[key] ?? 0))
+    .slice(0, 5);
   const top5Cpu  = sortTop5("cpu");
   const top5Ram  = sortTop5("ram");
   const top5Disk = sortTop5("disk");
