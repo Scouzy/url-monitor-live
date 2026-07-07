@@ -434,9 +434,9 @@ export function patchServerMetrics(name, metrics) {
     : (metrics.os || "Linux");
 
   const base = {
-    cpu:  clamp(Math.round(metrics.cpu  ?? 0)),
-    ram:  clamp(Math.round(metrics.ram  ?? 0)),
-    disk: clamp(Math.round(metrics.disk ?? 0)),
+    cpu:  Math.min(100, Math.max(0, Math.round(metrics.cpu  ?? 0))),
+    ram:  Math.min(100, Math.max(0, Math.round(metrics.ram  ?? 0))),
+    disk: Math.min(100, Math.max(0, Math.round(metrics.disk ?? 0))),
   };
   const agentIp = (() => { try { return new URL(metrics.agentUrl || "").hostname; } catch { return metrics.hostname || ""; } })();
   const patch = {

@@ -136,6 +136,7 @@ export default function App() {
       for (const agent of agents) {
         try {
           const m = await fetchVpsMetrics(agent.url);
+          console.log(`[VPS] "${agent.name}" (${agent.url}) → cpu:${m.cpu}% ram:${m.ram}% disk:${m.disk}% ramGb:${m.ramGb} diskGb:${m.diskGb} uptime:${m.uptimeDays}j`);
           setAgentMetrics(agent.id, m, "ok");
           patchServerMetrics(agent.name, { ...m, env: agent.env, app: agent.app || agent.name, role: agent.role, agentUrl: agent.url });
         } catch (e) {

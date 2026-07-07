@@ -292,7 +292,7 @@ export default function AgentsView() {
     try {
       const m = await fetchVpsMetrics(agent.url);
       setAgentMetrics(agent.id, m, "ok");
-      patchServerMetrics(agent.name, { ...m, env: agent.env, app: agent.app, role: agent.role });
+      patchServerMetrics(agent.name, { ...m, env: agent.env, app: agent.app || agent.name, role: agent.role, agentUrl: agent.url });
     } catch (e) {
       setAgentError(agent.id, e.message || "Injoignable");
     } finally {
