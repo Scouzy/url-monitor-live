@@ -56,11 +56,11 @@ export default function App() {
 
   useEffect(() => { localStorage.setItem("g1oeil_module", activeModule); }, [activeModule]);
 
-  /* ── Auto-refresh ITCare (mode client credentials uniquement, toutes les 30 min) ──
+  /* ── Auto-refresh ITCare (mode client credentials uniquement, toutes les 5 min) ──
      Actualise automatiquement les données si clientId + clientSecret sont mémorisés.
      Pour le mode token de session : pas de refresh auto (token non renouvelable). */
   const ITCARE_LAST_REFRESH = "capacity-itcare-last-refresh";
-  const ITCARE_INTERVAL_MS  = 30 * 60 * 1000; // 30 minutes
+  const ITCARE_INTERVAL_MS  = 5 * 60 * 1000; // 5 minutes
   useEffect(() => {
     async function doItcareRefresh() {
       if (getServersMeta().source !== "api") return;
