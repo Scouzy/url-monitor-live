@@ -338,15 +338,28 @@ function loadPersisted() {
   } catch { return null; }
 }
 
+/* Déduplique un tableau de serveurs par nom (insensible à la casse), conserve le dernier */
+function dedupeByName(list) {
+  const map = new Map();
+  list.forEach(s => map.set((s.name || s.Name || s.nom || "").toLowerCase().trim(), s));
+  return [...map.values()];
+}
+
 export function getServers() {
   if (!_cache) _cache = loadPersisted() || SERVER_DEFS.map(genServer);
+  /* Filet de sécurité : éliminer les doublons avant tout affichage */
+  if (_cache.length !== new Set(_cache.map(s => s.name?.toLowerCase().trim())).size) {
+    _cache = dedupeByName(_cache);
+  }
   return _cache;
 }
 
 export function getServersMeta() { return _meta; }
 
 export function setServers(rawList, source, label) {
-  const servers = applyMetricsFallback(rawList, source).map((row, i) => normalizeServer(row, i));
+  /* Dédupliquer les lignes brutes avant normalisation (doublons ITCare ou Excel) */
+  const uniqueRaw = dedupeByName(rawList);
+  const servers = applyMetricsFallback(uniqueRaw, source).map((row, i) => normalizeServer(row, i));
 
   if (servers.length === 0) throw new Error("Aucun serveur valide");
   _cache = servers;
@@ -356,7 +369,7 @@ export function setServers(rawList, source, label) {
        "Utilisation CPU/RAM/Disque" → toFlat → "utilisationcpu/ram/disque" → pick() dans normalizeServer.
        Garantit que le reload de page restaure exactement les valeurs visibles à l'écran,
        sans dépendre du snapshot ni risquer de retomber sur les défauts 30/40/35. */
-    const persistRows = rawList.map((r, i) => {
+    const persistRows = uniqueRaw.map((r, i) => {
       const s = servers[i];
       if (!s) return r;
       return { ...r, "Utilisation CPU": s.cpu, "Utilisation RAM": s.ram, "Utilisation Disque": s.disk };
