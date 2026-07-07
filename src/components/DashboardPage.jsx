@@ -95,6 +95,21 @@ function BarTooltip({ active, payload, label }) {
   );
 }
 
+/* ── Badge source serveur ─────────────────────────────────────── */
+function SourceBadge({ server }) {
+  const live  = !!server.lastVpsCheck;
+  const src   = server.source;
+  const label = live ? "live" : src === "api" ? "itcare" : src === "excel" ? "excel" : src === "demo" ? "démo" : src || "—";
+  const color = live ? "#34D399" : src === "demo" ? "#6B7280" : "#60A5FA";
+  const bg    = live ? "rgba(52,211,153,0.1)" : src === "demo" ? "rgba(107,114,128,0.1)" : "rgba(96,165,250,0.1)";
+  const border= live ? "rgba(52,211,153,0.25)" : src === "demo" ? "rgba(107,114,128,0.2)" : "rgba(96,165,250,0.25)";
+  return (
+    <span style={{ fontSize: 8, fontWeight: 700, padding: "1px 5px", borderRadius: 5, color, background: bg, border: `1px solid ${border}`, textTransform: "uppercase", letterSpacing: "0.05em", flexShrink: 0 }}>
+      {live ? "● " : ""}{label}
+    </span>
+  );
+}
+
 /* ── Composant principal ────────────────────────────────────── */
 export default function DashboardPage({ groups = [], allUrls = [], allServers = [], incidentLog = [], capacitySettings = {} }) {
   const isUp = u => { const s = getStatus(u); return s === STATUS.ONLINE || s === STATUS.SLOW; };
@@ -154,10 +169,20 @@ export default function DashboardPage({ groups = [], allUrls = [], allServers = 
   incidentLog.filter(e => e.type === "offline").forEach(e => { incidentsByUrl[e.url] = (incidentsByUrl[e.url] || 0) + 1; });
   const topIncidents = Object.entries(incidentsByUrl).sort((a, b) => b[1] - a[1]).slice(0, 5);
 
-  /* Top 5 par métrique */
-  const top5Cpu  = [...allServers].sort((a, b) => (b.cpu  ?? 0) - (a.cpu  ?? 0)).slice(0, 5);
-  const top5Ram  = [...allServers].sort((a, b) => (b.ram  ?? 0) - (a.ram  ?? 0)).slice(0, 5);
-  const top5Disk = [...allServers].sort((a, b) => (b.disk ?? 0) - (a.disk ?? 0)).slice(0, 5);
+  /* Top 5 par métrique — serveurs live (agent) prioritaires, démo en dernier */
+  const sortTop5 = (key) => [...allServers].sort((a, b) => {
+    const liveA = a.lastVpsCheck ? 1 : 0;
+    const liveB = b.lastVpsCheck ? 1 : 0;
+    if (liveB !== liveA) return liveB - liveA; /* live d'abord */
+    const demoA = a.source === "demo" ? 0 : 1;
+    const demoB = b.source === "demo" ? 0 : 1;
+    if (demoB !== demoA) return demoB - demoA; /* démo en dernier */
+    return (b[key] ?? 0) - (a[key] ?? 0);
+  }).slice(0, 5);
+  const top5Cpu  = sortTop5("cpu");
+  const top5Ram  = sortTop5("ram");
+  const top5Disk = sortTop5("disk");
+  const hasLiveData = allServers.some(s => s.lastVpsCheck || s.source !== "demo");
 
   /* Distributions CPU / RAM / Disque par tranche */
   const TRANCHES = [
@@ -328,6 +353,15 @@ export default function DashboardPage({ groups = [], allUrls = [], allServers = 
         </div>
       </div>
 
+      {/* ══ BANNIÈRE DONNÉES DÉMO ════════════════════════════ */}
+      {totalServers > 0 && !hasLiveData && (
+        <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 16px", borderRadius: 10, background: "rgba(251,191,36,0.06)", border: "1px solid rgba(251,191,36,0.2)" }}>
+          <AlertTriangle size={14} color="#FBBF24" style={{ flexShrink: 0 }} />
+          <span style={{ fontSize: 12, color: "#FBBF24", fontWeight: 600 }}>Données démo actives</span>
+          <span style={{ fontSize: 11, color: "#9CA3AF" }}>— Importez un fichier Excel/ITCare ou configurez des agents VPS pour afficher des métriques réelles.</span>
+        </div>
+      )}
+
       {/* ══ TOP 5 CONSOMMATEURS ════════════════════════════════ */}
       {totalServers > 0 && (
         <div>
@@ -353,18 +387,8 @@ export default function DashboardPage({ groups = [], allUrls = [], allServers = 
                       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
                         <div style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}>
                           <span style={{ fontSize: 10, fontWeight: 700, color: "#374151", width: 16, flexShrink: 0 }}>#{i + 1}</span>
-                          <span style={{ fontSize: 11, color: "#D1D5DB", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", width: 115, flexShrink: 0 }}>{s.name}</span>
-                          {s.app && (
-                            <span style={{
-                              display: "inline-flex", alignItems: "center", gap: 3, fontSize: 9, fontWeight: 600,
-                              padding: "1px 6px", borderRadius: 10, flexShrink: 0,
-                              background: "rgba(167,139,250,0.12)", color: "#A78BFA",
-                              border: "1px solid rgba(167,139,250,0.3)",
-                              maxWidth: 90, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
-                            }}>
-                              <AppWindow size={8} style={{ flexShrink: 0 }} />{s.app}
-                            </span>
-                          )}
+                          <span style={{ fontSize: 11, color: "#D1D5DB", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 100, flexShrink: 0 }}>{s.name}</span>
+                          <SourceBadge server={s} />
                         </div>
                         <span style={{ fontSize: 12, fontWeight: 800, color: barColor, fontFamily: "'JetBrains Mono', monospace", flexShrink: 0, marginLeft: 8 }}>{val}%</span>
                       </div>

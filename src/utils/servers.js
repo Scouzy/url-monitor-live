@@ -103,6 +103,7 @@ function genServer(def, idx) {
 
   return {
     id: `srv-${idx}`,
+    source: "demo",
     ...def,
     ip: `10.${10 + Math.floor(idx / 4)}.${(idx % 4) * 16 + 1}.${10 + idx}`,
     uptimeDays: Math.floor(30 + rnd() * 400),
@@ -334,7 +335,10 @@ function loadPersisted() {
     if (!Array.isArray(rows) || rows.length === 0) return null;
     _meta = parsed.meta || { source: "excel", loadedAt: null, label: null };
     /* Re-normalisation + fallback métriques depuis snapshot (évite les défauts 30/40/35) */
-    const normalized = applyMetricsFallback(rows, _meta.source).map((s, i) => normalizeServer(s, i));
+    const normalized = applyMetricsFallback(rows, _meta.source).map((s, i) => ({
+      source: s.source || _meta.source || "import",
+      ...normalizeServer(s, i),
+    }));
     return dedupeByName(normalized); /* élimine doublons persistés avant de peupler le cache */
   } catch { return null; }
 }
@@ -361,7 +365,11 @@ export function getServersMeta() { return _meta; }
 export function setServers(rawList, source, label) {
   /* Dédupliquer les lignes brutes avant normalisation (doublons ITCare ou Excel) */
   const uniqueRaw = dedupeByName(rawList);
-  const servers = applyMetricsFallback(uniqueRaw, source).map((row, i) => normalizeServer(row, i));
+  const servers = applyMetricsFallback(uniqueRaw, source).map((row, i) => ({
+    source,                       /* origine du chargement (api, excel, …) */
+    ...normalizeServer(row, i),
+    ...(row.source ? { source: row.source } : {}), /* préserver source vps-agent si déjà posée */
+  }));
 
   if (servers.length === 0) throw new Error("Aucun serveur valide");
   _cache = servers;

@@ -50,6 +50,7 @@ export default function App() {
   const [activeModule, setActiveModule] = useState(() => localStorage.getItem("g1oeil_module") || "dashboard");
   const [serverSubTab, setServerSubTab] = useState("inventory");
   const [agentInterval, setAgentInterval] = useState(() => parseInt(localStorage.getItem("g1oeil_agent_interval") || "30"));
+  const [agentCountdown, setAgentCountdown] = useState(() => parseInt(localStorage.getItem("g1oeil_agent_interval") || "30"));
   const [notifEnabled, setNotifEnabled] = useState(() => typeof Notification !== "undefined" && Notification.permission === "granted");
   const [capacitySettings, setCapacitySettings] = useState(() => loadCapacitySettings());
   const allServers    = useSyncExternalStore(subscribeServers, getServers);
@@ -129,7 +130,10 @@ export default function App() {
     return () => clearInterval(id);
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  /* ── Polling automatique des agents VPS (intervalle configurable) ── */
+  /* ── Polling automatique des agents VPS (ticker 1s + compte à rebours) ── */
+  const agentIntervalRef = useRef(agentInterval);
+  useEffect(() => { agentIntervalRef.current = agentInterval; }, [agentInterval]);
+
   useEffect(() => {
     const poll = async () => {
       const agents = loadVpsAgents().filter(a => a.enabled);
@@ -144,10 +148,15 @@ export default function App() {
         }
       }
     };
-    console.log(`\u25b6 [VPS Poll] Démarrage polling — intervalle : ${agentInterval}s`);
     poll();
-    const id = setInterval(() => { console.log(`\u23f1 [VPS Poll] Tick (${agentInterval}s)`); poll(); }, agentInterval * 1000);
-    return () => { console.log(`\u23f9 [VPS Poll] Arrêt (changement intervalle → nouveau : ${agentInterval}s)`); clearInterval(id); };
+    setAgentCountdown(agentInterval);
+    const id = setInterval(() => {
+      setAgentCountdown(prev => {
+        if (prev <= 1) { poll(); return agentIntervalRef.current; }
+        return prev - 1;
+      });
+    }, 1000);
+    return () => clearInterval(id);
   }, [agentInterval]);
   useEffect(() => { localStorage.setItem("g1oeil_tab", mainTab); }, [mainTab]);
 
@@ -550,16 +559,25 @@ export default function App() {
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
               {activeModule === "servers" && (
-                <div style={{
-                  display: "flex", alignItems: "center", gap: 7, padding: "5px 12px", borderRadius: 9,
-                  background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.06)",
-                }}>
-                  <span style={{ fontSize: 11, color: "#9CA3AF" }}>Serveurs</span>
-                  <select value={agentInterval} onChange={e => { const v = +e.target.value; setAgentInterval(v); localStorage.setItem("g1oeil_agent_interval", String(v)); }}
-                    style={{ background: "transparent", border: "none", color: "#E5E7EB", fontSize: 12, fontFamily: "'JetBrains Mono', monospace", cursor: "pointer" }}>
-                    {[10, 15, 30, 60, 120, 300].map(v => <option key={v} value={v} style={{ background: "#1F2937" }}>{v < 60 ? `${v}s` : `${v/60}min`}</option>)}
-                  </select>
-                </div>
+                <>
+                  <div style={{
+                    display: "flex", alignItems: "center", gap: 7, padding: "5px 12px", borderRadius: 9,
+                    background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.06)",
+                  }}>
+                    <span style={{ fontSize: 11, color: "#9CA3AF" }}>Serveurs</span>
+                    <select value={agentInterval} onChange={e => { const v = +e.target.value; setAgentInterval(v); localStorage.setItem("g1oeil_agent_interval", String(v)); }}
+                      style={{ background: "transparent", border: "none", color: "#E5E7EB", fontSize: 12, fontFamily: "'JetBrains Mono', monospace", cursor: "pointer" }}>
+                      {[10, 15, 30, 60, 120, 300].map(v => <option key={v} value={v} style={{ background: "#1F2937" }}>{v < 60 ? `${v}s` : `${v/60}min`}</option>)}
+                    </select>
+                  </div>
+                  <div style={{
+                    padding: "5px 12px", borderRadius: 9, background: "rgba(52,211,153,0.08)",
+                    border: "1px solid rgba(52,211,153,0.15)", fontSize: 12, color: "#34D399",
+                    fontFamily: "'JetBrains Mono', monospace", fontWeight: 600, minWidth: 52, textAlign: "center",
+                  }}>
+                    {agentCountdown >= 60 ? `${Math.ceil(agentCountdown / 60)}min` : `${agentCountdown}s`}
+                  </div>
+                </>
               )}
               {activeModule === "servers" && serverSubTab === "inventory" && <ServerImport />}
             </div>
