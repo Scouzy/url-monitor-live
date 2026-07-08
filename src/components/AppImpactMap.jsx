@@ -240,8 +240,9 @@ function AppDetailPanel({ app, meta = {}, allDeps, incidentLog, onClose, onSaveM
 
 const TABS = ["Carte", "Inventaire", "Dépendances"];
 
-export default function AppImpactMap() {
-  const servers = useSyncExternalStore(subscribeServers, getServers);
+export default function AppImpactMap({ servers: propServers }) {
+  const storeServers = useSyncExternalStore(subscribeServers, getServers);
+  const servers = propServers || storeServers;
   const [impacts, setImpacts] = useState(() => loadImpacts());
   const [tab, setTab]         = useState("Carte");
   const [expanded, setExpanded] = useState(new Set());

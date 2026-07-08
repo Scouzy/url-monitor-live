@@ -16,6 +16,15 @@ const SYNC_URL    = '/api/sync';
 const STREAM_URL  = '/api/sync/stream';
 const SYNC_TS_KEY = 'g1oeil-lan-sync-ts';
 
+/* Polyfill AbortSignal.timeout pour les navigateurs mobiles qui ne le supportent pas */
+if (typeof AbortSignal !== "undefined" && typeof AbortSignal.timeout !== "function") {
+  AbortSignal.timeout = function (ms) {
+    const controller = new AbortController();
+    setTimeout(() => controller.abort(), ms);
+    return controller.signal;
+  };
+}
+
 /* Clés localStorage à synchroniser (lecture/écriture par chaîne brute) */
 const SYNC_LS_KEYS = ['capacity-servers', 'capacity-snapshots'];
 

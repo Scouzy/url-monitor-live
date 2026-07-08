@@ -115,21 +115,53 @@ function genServer(def, idx) {
 }
 
 /* ── Génération historique + projection à partir de valeurs réelles (import Excel/API) ── */
-function buildSeries(base, growth, seed) {
+function buildSeries(base, growth, seed, realHistory) {
   const rnd = mulberry32(seed);
-  const history24h = Array.from({ length: 24 }, (_, h) => {
-    const dayFactor = h >= 8 && h <= 18 ? 1 + 0.25 * Math.sin(((h - 8) / 10) * Math.PI) : 0.75;
-    return {
+
+  /* Si on dispose de l'historique réel ITCare (séries de monitoring),
+     l'utiliser directement pour history24h au lieu de données simulées. */
+  let history24h;
+  if (realHistory && Array.isArray(realHistory) && realHistory.length > 0) {
+    history24h = realHistory.slice(0, 24).map((pt, h) => ({
       h: `${String(h).padStart(2, "0")}h`,
-      cpu:  clamp(base.cpu * dayFactor + (rnd() - 0.5) * 12),
-      ram:  clamp(base.ram * (0.92 + dayFactor * 0.1) + (rnd() - 0.5) * 6),
-      disk: clamp(base.disk + h * 0.05 + (rnd() - 0.5) * 2),
-    };
-  });
+      cpu:  clamp(pt.cpu  ?? base.cpu),
+      ram:  clamp(pt.ram  ?? base.ram),
+      disk: clamp(pt.disk ?? base.disk),
+    }));
+    /* Compléter jusqu'à 24 points si la série est plus courte */
+    while (history24h.length < 24) {
+      const h = history24h.length;
+      history24h.push({ h: `${String(h).padStart(2, "0")}h`, cpu: base.cpu, ram: base.ram, disk: base.disk });
+    }
+  } else {
+    history24h = Array.from({ length: 24 }, (_, h) => {
+      const dayFactor = h >= 8 && h <= 18 ? 1 + 0.25 * Math.sin(((h - 8) / 10) * Math.PI) : 0.75;
+      return {
+        h: `${String(h).padStart(2, "0")}h`,
+        cpu:  clamp(base.cpu * dayFactor + (rnd() - 0.5) * 12),
+        ram:  clamp(base.ram * (0.92 + dayFactor * 0.1) + (rnd() - 0.5) * 6),
+        disk: clamp(base.disk + h * 0.05 + (rnd() - 0.5) * 2),
+      };
+    });
+  }
+  /* Forcer le dernier point = valeurs réelles courantes (cohérence jauges / charts / dashboard) */
+  history24h[23] = { h: "23h", cpu: base.cpu, ram: base.ram, disk: base.disk };
+
   const labels = monthLabels();
   const monthly = labels.map(({ label, projected }, i) => {
     const offset = i - 5;
-    const noise = projected ? 0 : (rnd() - 0.5) * 6;
+    /* Mois passés : variation plus marquée pour visualiser l'évolution
+       Mois courant (offset=0) : valeurs exactes = cohérence avec jauges
+       Mois projetés : croissance linéaire depuis les valeurs courantes */
+    let noise;
+    if (projected) {
+      noise = 0;
+    } else if (offset === 0) {
+      noise = 0;
+    } else {
+      /* Bruit proportionnel à l'éloignement pour montrer une évolution réaliste */
+      noise = (rnd() - 0.5) * 4 * Math.abs(offset);
+    }
     return {
       month: label, projected,
       cpu:  clamp(base.cpu  + offset * growth        + noise),
@@ -156,6 +188,15 @@ const num = (v, fallback = 0) => {
   const n = parseFloat(String(v ?? "").replace(",", "."));
   return Number.isFinite(n) ? n : fallback;
 };
+
+/* Nettoie un nom d'application en retirant les suffixes d'environnement connus.
+   Ex: "Certifpro - Recette" → "Certifpro", "MonApp - Prod" → "MonApp" */
+const ENV_SUFFIX_RE = /\s*[-–]\s*(PROD|PRODUCTION|RECETTE|UAT|QUALIF|STAGING|PREPROD|DEV|DEVELOPPEMENT|TEST|INTEGRATION|INTEG|QA)$/i;
+function cleanAppName(app) {
+  if (app == null) return null;
+  const cleaned = String(app).trim().replace(ENV_SUFFIX_RE, "").trim();
+  return cleaned || String(app).trim();
+}
 
 /* Convertit une date Excel (nombre série) ou une chaîne ISO en date lisible FR */
 function formatDate(raw) {
@@ -275,7 +316,7 @@ export function normalizeServer(raw, idx) {
     id: `srv-ext-${idx}`,
     name, role,
     env:       env       != null ? String(env).trim()       : null,
-    app:       app       != null ? String(app).trim()       : null,
+    app:       cleanAppName(app),
     statut:    statut    != null ? String(statut).trim()    : null,
     createdAt: formatDate(createdAt),
     os: String(osVal || "—"),
@@ -438,6 +479,29 @@ export function removeServer(id) {
 export function subscribeServers(fn) {
   _listeners.add(fn);
   return () => _listeners.delete(fn);
+}
+
+/* ── Filtre d'applications global (partagé entre tous les onglets) ── */
+const APP_FILTER_KEY = "capacity-app-filter";
+let _appFilter = new Set();
+const _appFilterListeners = new Set();
+
+try {
+  const raw = localStorage.getItem(APP_FILTER_KEY);
+  if (raw) _appFilter = new Set(JSON.parse(raw));
+} catch {}
+
+export function getAppFilter() { return _appFilter; }
+
+export function setAppFilter(apps) {
+  _appFilter = apps instanceof Set ? apps : new Set(apps);
+  try { localStorage.setItem(APP_FILTER_KEY, JSON.stringify([..._appFilter])); } catch {}
+  _appFilterListeners.forEach(fn => fn());
+}
+
+export function subscribeAppFilter(fn) {
+  _appFilterListeners.add(fn);
+  return () => _appFilterListeners.delete(fn);
 }
 
 /* ── Mise à jour depuis un agent VPS ── */

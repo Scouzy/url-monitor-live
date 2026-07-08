@@ -39,8 +39,9 @@ function CodeBlock({ code, filename }) {
   );
 }
 
-export default function AgentDeployMass() {
-  const servers    = useSyncExternalStore(subscribeServers, getServers);
+export default function AgentDeployMass({ servers: propServers }) {
+  const storeServers = useSyncExternalStore(subscribeServers, getServers);
+  const servers    = propServers || storeServers;
   const vpsAgents  = loadVpsAgents();
   const configuredUrls = new Set(vpsAgents.map(a => (a.url || "").replace(/\/+$/, "")));
 

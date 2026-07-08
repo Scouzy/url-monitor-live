@@ -3,13 +3,13 @@ import {
   Server, Search, X, Cpu, MemoryStick, HardDrive, Globe,
   Database, Boxes, Zap, Clock, Network, MonitorCog, Info, AppWindow,
   TrendingUp, AlertTriangle, ChevronDown, Calendar, Activity,
-  Shield, Archive, Layers, Wrench,
+  Shield, Archive, Layers, Wrench, Check,
 } from "lucide-react";
 import {
   ResponsiveContainer, AreaChart, Area, XAxis, YAxis, Tooltip, CartesianGrid,
   ComposedChart, Line, ReferenceLine,
 } from "recharts";
-import { getServers, subscribeServers, ROLES, gaugeColor, removeServer } from "../utils/servers";
+import { getServers, subscribeServers, ROLES, gaugeColor, removeServer, getAppFilter, setAppFilter, subscribeAppFilter } from "../utils/servers";
 import { loadSnapshots, lastDelta, buildTrendChartData } from "../utils/snapshots";
 import ServerGauge from "./ServerGauge";
 
@@ -42,14 +42,21 @@ function EnvBadge({ env }) {
   );
 }
 
-function AppBadge({ app }) {
+function AppBadge({ app, onClick, active }) {
   return (
-    <span style={{
-      display: "inline-flex", alignItems: "center", gap: 4, fontSize: 10, fontWeight: 600,
-      padding: "2px 8px", borderRadius: 12,
-      background: "rgba(167,139,250,0.12)", color: "#A78BFA", border: "1px solid rgba(167,139,250,0.35)",
-      maxWidth: 140, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
-    }}>
+    <span
+      onClick={onClick ? (e) => { e.stopPropagation(); onClick(); } : undefined}
+      style={{
+        display: "inline-flex", alignItems: "center", gap: 4, fontSize: 10, fontWeight: 600,
+        padding: "2px 8px", borderRadius: 12,
+        background: active ? "rgba(167,139,250,0.3)" : "rgba(167,139,250,0.12)",
+        color: "#A78BFA", border: "1px solid rgba(167,139,250,0.35)",
+        maxWidth: 140, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+        cursor: onClick ? "pointer" : "default",
+        transition: "background 0.15s",
+      }}
+      title={onClick ? `Filtrer par application : ${app}` : undefined}
+    >
       <AppWindow size={10} style={{ flexShrink: 0 }} /> {app}
     </span>
   );
@@ -165,30 +172,73 @@ function DeltaBadge({ delta }) {
 function ServerTrend({ server, snapshots }) {
   const [open, setOpen] = useState(true);
 
-  /* Essayer les données réelles d'abord */
-  const snap = useMemo(() => buildTrendChartData(server.name, snapshots), [server.name, snapshots]);
+  /* Valeurs courantes du serveur (cohérentes avec les jauges et les graphiques 24h) */
+  const cur = { cpu: server.cpu, ram: server.ram, disk: server.disk };
+  const growth = server.growthRate || 1.5;
+
+  /* Essayer les données réelles d'abord — uniquement si >= 7 jours d'historique */
+  const snap = useMemo(() => {
+    const s = buildTrendChartData(server.name, snapshots);
+    if (!s || s.spanDays < 7) return null;
+    return s;
+  }, [server.name, snapshots]);
 
   let data, breach, m3, m6, subtitle;
   if (snap) {
-    data     = snap.data;
-    breach   = snap.breach;
-    m3       = snap.proj3m;
-    m6       = snap.proj6m;
-    subtitle = snap.spanDays < 1
-      ? `${snap.snapCount} mesures (aujourd'hui)`
-      : `${snap.snapCount} mesures · ${snap.spanDays}j d'historique`;
+    /* Remplacer le dernier point réel par les valeurs courantes du serveur */
+    const realPts = snap.data.slice(0, snap.snapCount);
+    const projPts = snap.data.slice(snap.snapCount);
+
+    if (realPts.length > 0) {
+      const lastIdx = realPts.length - 1;
+      realPts[lastIdx] = {
+        ...realPts[lastIdx],
+        cpu_r:  cur.cpu,
+        ram_r:  cur.ram,
+        disk_r: cur.disk,
+        cpu_p:  cur.cpu,
+        ram_p:  cur.ram,
+        disk_p: cur.disk,
+      };
+    }
+
+    /* Recalculer les projections depuis les valeurs courantes avec le growthRate */
+    const projMonths = [30, 60, 90, 120, 150, 180];
+    const projData = projMonths.map((days, i) => {
+      const offset = i + 1;
+      const cpuV  = Math.min(100, Math.round((cur.cpu  + offset * growth)        * 10) / 10);
+      const ramV  = Math.min(100, Math.round((cur.ram  + offset * growth * 0.85) * 10) / 10);
+      const diskV = Math.min(100, Math.round((cur.disk + offset * growth * 1.15) * 10) / 10);
+      return {
+        month: `+${i + 1}m`,
+        cpu: cpuV, ram: ramV, disk: diskV,
+        cpu_r: null, ram_r: null, disk_r: null,
+        cpu_p: cpuV, ram_p: ramV, disk_p: diskV,
+      };
+    });
+
+    data = [...realPts, ...projData];
+    breach = projData.find(p => p.cpu >= 90 || p.ram >= 90 || p.disk >= 90);
+    m3 = projData[2];
+    m6 = projData[5];
+    subtitle = `${snap.snapCount} mesures · ${snap.spanDays}j d'historique`;
   } else {
-    /* Fallback : données simulées monthly */
+    /* Fallback : données simulées monthly — le mois courant = valeurs courantes */
     data = (server.monthly || []).map((m, i, arr) => {
       const isEdge = !m.projected && arr[i + 1]?.projected;
+      /* Forcer le mois courant (offset 0, non projeté) = valeurs courantes exactes */
+      const isCurrent = !m.projected && i === 5;
+      const cpu  = isCurrent ? cur.cpu  : m.cpu;
+      const ram  = isCurrent ? cur.ram  : m.ram;
+      const disk = isCurrent ? cur.disk : m.disk;
       return {
         month: m.month,
-        cpu_r:  !m.projected || isEdge ? m.cpu  : null,
-        ram_r:  !m.projected || isEdge ? m.ram  : null,
-        disk_r: !m.projected || isEdge ? m.disk : null,
-        cpu_p:  m.projected  || isEdge ? m.cpu  : null,
-        ram_p:  m.projected  || isEdge ? m.ram  : null,
-        disk_p: m.projected  || isEdge ? m.disk : null,
+        cpu_r:  !m.projected || isEdge ? cpu  : null,
+        ram_r:  !m.projected || isEdge ? ram  : null,
+        disk_r: !m.projected || isEdge ? disk : null,
+        cpu_p:  m.projected  || isEdge ? cpu  : null,
+        ram_p:  m.projected  || isEdge ? ram  : null,
+        disk_p:  m.projected  || isEdge ? disk : null,
       };
     });
     breach = (server.monthly || []).find(m => m.projected && (m.cpu >= 90 || m.ram >= 90 || m.disk >= 90));
@@ -569,18 +619,149 @@ const ENV_FILTERS = [
   { id: "recette",    label: "Recette",    test: (env) => /recette|uat|pr[ée]?.?prod|staging/i.test(env) },
 ];
 
+/* ── Sélecteur multi-applications ── */
+function AppFilterDropdown({ servers, selectedApps, onChange }) {
+  const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState("");
+
+  /* Liste unique triée des applications */
+  const allApps = useMemo(() => {
+    const set = new Set();
+    servers.forEach(s => { if (s.app) set.add(s.app); });
+    return [...set].sort((a, b) => a.localeCompare(b));
+  }, [servers]);
+
+  const filteredApps = allApps.filter(a => a.toLowerCase().includes(search.toLowerCase()));
+  /* Logique : les apps cochées sont EXCLUES de l'affichage.
+     "Toutes" = rien coché (Set vide) → tout afficher
+     "Aucune" = tout cocher → tout masquer */
+  const allVisible = selectedApps.size === 0;
+  const noneVisible = selectedApps.size === allApps.length && allApps.length > 0;
+
+  const toggleApp = (app) => {
+    const next = new Set(selectedApps);
+    if (next.has(app)) next.delete(app); else next.add(app);
+    onChange(next);
+  };
+
+  return (
+    <div style={{ position: "relative", flexShrink: 0 }}>
+      <button
+        onClick={() => setOpen(o => !o)}
+        style={{
+          display: "inline-flex", alignItems: "center", gap: 5, padding: "6px 12px", borderRadius: 20,
+          fontSize: 11, fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap",
+          border: `1px solid ${open ? "rgba(167,139,250,0.4)" : "rgba(255,255,255,0.07)"}`,
+          background: open ? "rgba(167,139,250,0.18)" : "rgba(255,255,255,0.03)",
+          color: open ? "#A78BFA" : "#6B7280", transition: "all 0.15s",
+        }}
+      >
+        <AppWindow size={12} />
+        {allVisible ? "Applications" : `${allApps.length - selectedApps.size} affichée${allApps.length - selectedApps.size > 1 ? "s" : ""}`}
+        <ChevronDown size={11} style={{ transform: open ? "rotate(180deg)" : "none", transition: "transform 0.2s" }} />
+      </button>
+
+      {open && (
+        <>
+          <div style={{ position: "fixed", inset: 0, zIndex: 998 }} onClick={() => setOpen(false)} />
+          <div style={{
+            position: "absolute", top: "100%", right: 0, marginTop: 4, zIndex: 999,
+            width: 260, maxHeight: 380, display: "flex", flexDirection: "column",
+            background: "#151B26", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 10,
+            boxShadow: "0 8px 24px rgba(0,0,0,0.5)",
+          }}>
+            {/* En-tête fixe : recherche + actions */}
+            <div style={{ padding: "10px 10px 8px", borderBottom: "1px solid rgba(255,255,255,0.06)", flexShrink: 0 }}>
+              <div style={{ fontSize: 10, fontWeight: 700, color: "#6B7280", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 6 }}>
+                Filtrer les applications
+              </div>
+              <input
+                value={search}
+                onChange={e => setSearch(e.target.value)}
+                placeholder="Rechercher…"
+                style={{
+                  width: "100%", background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)",
+                  borderRadius: 7, padding: "5px 8px", color: "#E5E7EB", fontSize: 11,
+                  fontFamily: "'JetBrains Mono', monospace", outline: "none",
+                }}
+              />
+              <div style={{ display: "flex", gap: 4, marginTop: 6 }}>
+                <button onClick={() => onChange(new Set())} style={{
+                  flex: 1, padding: "4px 8px", borderRadius: 6, fontSize: 10, fontWeight: 600, cursor: "pointer",
+                  background: allVisible ? "rgba(167,139,250,0.2)" : "rgba(255,255,255,0.04)",
+                  border: "1px solid rgba(167,139,250,0.2)", color: allVisible ? "#A78BFA" : "#6B7280",
+                }}>Tout afficher</button>
+                <button onClick={() => onChange(new Set(allApps))} style={{
+                  flex: 1, padding: "4px 8px", borderRadius: 6, fontSize: 10, fontWeight: 600, cursor: "pointer",
+                  background: noneVisible ? "rgba(248,113,113,0.2)" : "rgba(255,255,255,0.04)",
+                  border: "1px solid rgba(248,113,113,0.2)", color: noneVisible ? "#F87171" : "#6B7280",
+                }}>Tout masquer</button>
+              </div>
+            </div>
+
+            {/* Liste scrollable */}
+            <div style={{ overflowY: "auto", flex: 1, padding: "4px 0" }}>
+              {filteredApps.length === 0 && (
+                <div style={{ padding: "16px 10px", fontSize: 10, color: "#4B5563", textAlign: "center" }}>
+                  Aucune application trouvée
+                </div>
+              )}
+              {filteredApps.map(app => {
+                const isExcluded = selectedApps.has(app);
+                const count = servers.filter(s => s.app === app).length;
+                return (
+                  <div key={app} onClick={() => toggleApp(app)} style={{
+                    display: "flex", alignItems: "center", gap: 8, padding: "6px 10px", cursor: "pointer",
+                    transition: "background 0.1s", userSelect: "none",
+                  }} onMouseEnter={e => e.currentTarget.style.background = "rgba(255,255,255,0.03)"}
+                    onMouseLeave={e => e.currentTarget.style.background = "transparent"}
+                  >
+                    {/* Checkbox custom */}
+                    <div style={{
+                      width: 15, height: 15, borderRadius: 4, flexShrink: 0,
+                      border: isExcluded ? "1px solid rgba(248,113,113,0.4)" : "1px solid rgba(167,139,250,0.4)",
+                      background: isExcluded ? "rgba(248,113,113,0.15)" : "rgba(167,139,250,0.1)",
+                      display: "flex", alignItems: "center", justifyContent: "center",
+                    }}>
+                      {!isExcluded && <Check size={10} color="#A78BFA" />}
+                    </div>
+                    <span style={{
+                      fontSize: 11, color: isExcluded ? "#4B5563" : "#9CA3AF",
+                      fontWeight: isExcluded ? 400 : 500,
+                      overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1,
+                      textDecoration: isExcluded ? "line-through" : "none",
+                    }}>
+                      {app}
+                    </span>
+                    <span style={{ fontSize: 9, color: "#4B5563", flexShrink: 0 }}>{count}</span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 /* ── Vue principale ── */
-export default function ServersView() {
-  const servers     = useSyncExternalStore(subscribeServers, getServers);
+export default function ServersView({ servers: propServers }) {
+  const storeServers = useSyncExternalStore(subscribeServers, getServers);
+  const servers     = propServers || storeServers;
+  const allServersForFilter = storeServers; /* liste complète pour le dropdown */
   const snapshots   = useMemo(() => loadSnapshots(), [servers]);
   const [filterText, setFilterText] = useState("");
   const [filterEnv, setFilterEnv]   = useState("all");
+  const [filterApp, setFilterApp]   = useState(null);
+  const selectedApps = useSyncExternalStore(subscribeAppFilter, getAppFilter);
   const [selectedId, setSelectedId] = useState(null);
   const [deleteConfirm, setDeleteConfirm] = useState(null);
 
   const envFilter = ENV_FILTERS.find(f => f.id === filterEnv);
   const filtered = servers.filter(s => {
     if (envFilter?.test && !(s.env && envFilter.test(s.env))) return false;
+    if (filterApp && s.app !== filterApp) return false;
     if (filterText) {
       const q = filterText.toLowerCase();
       if (!s.name.toLowerCase().includes(q) && !(s.app || "").toLowerCase().includes(q) && !(s.statut || "").toLowerCase().includes(q) && !(s.ip || "").toLowerCase().includes(q)) return false;
@@ -619,6 +800,18 @@ export default function ServersView() {
               color: filterEnv === id ? "#A5B4FC" : "#6B7280", transition: "all 0.15s",
             }}>{label}</button>
           ))}
+          {filterApp && (
+            <button onClick={() => setFilterApp(null)} style={{
+              display: "inline-flex", alignItems: "center", gap: 4, padding: "5px 10px", borderRadius: 20,
+              fontSize: 11, fontWeight: 600, cursor: "pointer",
+              background: "rgba(167,139,250,0.2)", border: "1px solid rgba(167,139,250,0.4)",
+              color: "#A78BFA", whiteSpace: "nowrap",
+            }}>
+              <AppWindow size={11} /> {filterApp}
+              <X size={11} style={{ marginLeft: 2 }} />
+            </button>
+          )}
+          <AppFilterDropdown servers={allServersForFilter} selectedApps={selectedApps} onChange={setAppFilter} />
           <span style={{ fontSize: 11, color: "#4B5563" }}>{filtered.length} / {servers.length}</span>
         </div>
 
@@ -675,7 +868,7 @@ export default function ServersView() {
                   </div>
                   <div style={{ display: "flex", gap: 4, flexWrap: "wrap", justifyContent: "flex-end", flexShrink: 0 }}>
                     {s.env ? <EnvBadge env={s.env} /> : <RoleBadge role={s.role} />}
-                    {s.app && <AppBadge app={s.app} />}
+                    {s.app && <AppBadge app={s.app} active={filterApp === s.app} onClick={() => setFilterApp(prev => prev === s.app ? null : s.app)} />}
                   </div>
                 </div>
 

@@ -1,4 +1,4 @@
-﻿import { useState, useEffect, useRef, useCallback, useSyncExternalStore } from "react";
+﻿import { useState, useEffect, useRef, useCallback, useSyncExternalStore, useMemo } from "react";
 import { Globe, Plus, RefreshCw, Pause, Play, Wifi, WifiOff, Zap, LayoutGrid, List, Search, X, Activity, AlertTriangle, Settings, Bell, BellOff, Lock, CheckCircle, Server, Menu } from "lucide-react";2.
 import { STATUS, DEFAULT_INTERVAL, MAX_HISTORY, getStatus } from "./constants";
 import { checkUrl } from "./utils/checkUrl";
@@ -21,7 +21,7 @@ import VpsAgentsConfig from "./components/VpsAgentsConfig";
 import AgentDeployMass from "./components/AgentDeployMass";
 import SettingsPage from "./components/SettingsPage";
 import DashboardPage from "./components/DashboardPage";
-import { subscribeServers, getServers, setServers, getServersMeta, recommendations as getRecos, patchServerMetrics, refreshFromStorage } from "./utils/servers";
+import { subscribeServers, getServers, setServers, getServersMeta, recommendations as getRecos, patchServerMetrics, refreshFromStorage, subscribeAppFilter, getAppFilter } from "./utils/servers";
 import { loadVpsAgents, fetchVpsMetrics, setAgentMetrics, setAgentError, subscribeAgents, getAllAgentMetrics } from "./utils/vpsAgents";
 import { loadCapacitySettings, saveCapacitySettings } from "./utils/capacitySettings";
 import { loadTodos } from "./utils/todoStorage";
@@ -54,6 +54,11 @@ export default function App() {
   const [notifEnabled, setNotifEnabled] = useState(() => typeof Notification !== "undefined" && Notification.permission === "granted");
   const [capacitySettings, setCapacitySettings] = useState(() => loadCapacitySettings());
   const allServers    = useSyncExternalStore(subscribeServers, getServers);
+  const appFilter     = useSyncExternalStore(subscribeAppFilter, getAppFilter);
+  const filteredServers = useMemo(() => {
+    if (!appFilter || appFilter.size === 0) return allServers;
+    return allServers.filter(s => !appFilter.has(s.app));
+  }, [allServers, appFilter]);
   const agentsMetrics = useSyncExternalStore(subscribeAgents, getAllAgentMetrics);
   const agentsBadge   = Object.values(agentsMetrics).filter(e => e.status === "error").length;
   const [todoBadge, setTodoBadge] = useState(() => loadTodos().filter(t => t.status !== "done").length);
@@ -181,10 +186,10 @@ export default function App() {
   const serverAlertInitRef = useRef(false);
   useEffect(() => {
     if (!serverAlertInitRef.current) { serverAlertInitRef.current = true; return; }
-    if (allServers.length === 0) return;
+    if (filteredServers.length === 0) return;
     const { cpuThreshold = 90, ramThreshold = 90, diskThreshold = 90 } = capacitySettings;
     const thresholds = { cpu: cpuThreshold, ram: ramThreshold, disk: diskThreshold };
-    allServers.forEach(s => {
+    filteredServers.forEach(s => {
       ['cpu', 'ram', 'disk'].forEach(metric => {
         const val = s[metric] ?? 0;
         if (val < thresholds[metric]) return;
@@ -195,14 +200,14 @@ export default function App() {
         });
       });
     });
-    getRecos(allServers).filter(r => r.severity === "critical").forEach(r => {
+    getRecos(filteredServers).filter(r => r.severity === "critical").forEach(r => {
       setIncidentLog(prev => {
         const recent = prev.find(e => e.type === "capacity_alert" && e.recoText === r.text && Date.now() - e.ts < 86400000);
         if (recent) return prev;
         return addIncident(prev, { url: r.server || "Flotte", groupName: "Capacity", type: "capacity_alert", recoText: r.text, recoType: r.type });
       });
     });
-  }, [allServers]); // eslint-disable-line
+  }, [filteredServers]); // eslint-disable-line
 
   /* ── Scan SSL initial : certs déjà stockés ≤ 10j ── */
   useEffect(() => {
@@ -518,7 +523,7 @@ export default function App() {
         activeModule={activeNavItem}
         journalBadge={incidentLog.filter(e => e.type !== "online").length}
         todoBadge={todoBadge}
-        serversBadge={allServers.length}
+        serversBadge={filteredServers.length}
         agentsBadge={agentsBadge}
         onSelectModule={(id) => {
           if (id === "journal" || id === "parametres") { setActiveModule("monitor"); setMainTab(id); }
@@ -530,13 +535,13 @@ export default function App() {
       {activeModule !== "monitor" && (
         <div style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0 }}>
           <header style={{
-            borderBottom: "1px solid rgba(255,255,255,0.06)", padding: "14px 24px",
+            borderBottom: "1px solid rgba(255,255,255,0.06)", padding: isMobile ? "10px 12px" : "14px 24px",
             display: "flex", alignItems: "flex-start", justifyContent: "space-between",
-            flexWrap: "wrap", gap: 12,
+            flexWrap: "wrap", gap: isMobile ? 8 : 12,
             background: "rgba(255,255,255,0.02)", backdropFilter: "blur(12px)",
             position: "sticky", top: 0, zIndex: 10,
           }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
               {isMobile && (
                 <button onClick={() => setSidebarOpen(true)} style={{
                   background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.08)",
@@ -544,72 +549,74 @@ export default function App() {
                   color: "#9CA3AF", cursor: "pointer", flexShrink: 0,
                 }}><Menu size={16} /></button>
               )}
-              <div>
-              <h1 style={{ fontSize: 16, fontWeight: 700, color: "#F9FAFB", margin: 0 }}>
+              <div style={{ minWidth: 0 }}>
+              <h1 style={{ fontSize: isMobile ? 14 : 16, fontWeight: 700, color: "#F9FAFB", margin: 0 }}>
                 {activeModule === "servers"
                   ? ({ inventory: "Inventaire serveurs", agents: "Agents VPS", config: "Configuration agents", deploy: "Déploiement en masse" }[serverSubTab] || "Serveurs")
                   : ({ dashboard: "Dashboard", capacity: "Capacity Planning", todo: "TodoList", workflows: "Workflows", impacts: "Impacts Applicatifs", journal: "Journal des alertes", parametres: "Paramètres" }[activeModule] || activeModule)}
               </h1>
+              {!isMobile && (
               <p style={{ fontSize: 11, color: "#4B5563", margin: 0 }}>
                 {activeModule === "servers"
                   ? ({ inventory: "CPU, RAM et disque en temps réel par serveur", agents: "Supervision temps réel · Linux & Windows · CPU / RAM / Disque / Réseau / Processus / Répertoires", config: "Ajouter · modifier · tester les agents VPS · télécharger les scripts", deploy: "Scripts pré-remplis SSH · WinRM · Ansible pour déployer les agents sur tout l'inventaire" }[serverSubTab] || "")
                   : ({ dashboard: "Vue synthetique - KPIs - alertes - SSL - performance", capacity: "Projections 6 mois · seuil critique 90% · recommandations", todo: "Tâches en cours · auto-générées + manuelles", workflows: "Création et gestion de procédures d'intervention pas à pas", impacts: "Cartographie des dépendances entre applications et serveurs", journal: "Historique des événements · pannes · SSL · serveurs", parametres: "Configuration de l'application" }[activeModule] || "")}
               </p>
+              )}
               </div>
             </div>
-            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: isMobile ? 6 : 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
               {activeModule === "servers" && (
                 <>
                   <div style={{
-                    display: "flex", alignItems: "center", gap: 7, padding: "5px 12px", borderRadius: 9,
+                    display: "flex", alignItems: "center", gap: isMobile ? 4 : 7, padding: isMobile ? "4px 8px" : "5px 12px", borderRadius: 9,
                     background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.06)",
                   }}>
-                    <span style={{ fontSize: 11, color: "#9CA3AF" }}>Serveurs</span>
+                    {!isMobile && <span style={{ fontSize: 11, color: "#9CA3AF" }}>Serveurs</span>}
                     <select value={agentInterval} onChange={e => { const v = +e.target.value; setAgentInterval(v); localStorage.setItem("g1oeil_agent_interval", String(v)); }}
-                      style={{ background: "transparent", border: "none", color: "#E5E7EB", fontSize: 12, fontFamily: "'JetBrains Mono', monospace", cursor: "pointer" }}>
+                      style={{ background: "transparent", border: "none", color: "#E5E7EB", fontSize: isMobile ? 11 : 12, fontFamily: "'JetBrains Mono', monospace", cursor: "pointer" }}>
                       {[10, 15, 30, 60, 120, 300].map(v => <option key={v} value={v} style={{ background: "#1F2937" }}>{v < 60 ? `${v}s` : `${v/60}min`}</option>)}
                     </select>
                   </div>
                   <div style={{
-                    padding: "5px 12px", borderRadius: 9, background: "rgba(52,211,153,0.08)",
-                    border: "1px solid rgba(52,211,153,0.15)", fontSize: 12, color: "#34D399",
-                    fontFamily: "'JetBrains Mono', monospace", fontWeight: 600, minWidth: 52, textAlign: "center",
+                    padding: isMobile ? "4px 8px" : "5px 12px", borderRadius: 9, background: "rgba(52,211,153,0.08)",
+                    border: "1px solid rgba(52,211,153,0.15)", fontSize: isMobile ? 11 : 12, color: "#34D399",
+                    fontFamily: "'JetBrains Mono', monospace", fontWeight: 600, minWidth: isMobile ? 40 : 52, textAlign: "center",
                   }}>
                     {agentCountdown >= 60 ? `${Math.ceil(agentCountdown / 60)}min` : `${agentCountdown}s`}
                   </div>
                 </>
               )}
-              {activeModule === "servers" && serverSubTab === "inventory" && <ServerImport />}
+              {activeModule === "servers" && serverSubTab === "inventory" && <ServerImport isMobile={isMobile} />}
             </div>
           </header>
           {/* Sous-onglets Serveurs */}
           {activeModule === "servers" && (
-            <div style={{ display: "flex", gap: 4, padding: "0 24px 0", borderBottom: "1px solid rgba(255,255,255,0.06)", background: "rgba(255,255,255,0.01)" }}>
+            <div style={{ display: "flex", gap: 4, padding: isMobile ? "0 12px" : "0 24px", borderBottom: "1px solid rgba(255,255,255,0.06)", background: "rgba(255,255,255,0.01)", overflowX: "auto", WebkitOverflowScrolling: "touch" }}>
               {[
                 { id: "inventory", label: "Inventaire" },
                 { id: "agents",    label: `Agents VPS${agentsBadge > 0 ? ` (${agentsBadge} ✗)` : ""}` },
-                { id: "config",    label: "Configuration agents" },
+                { id: "config",    label: isMobile ? "Config" : "Configuration agents" },
                 { id: "deploy",    label: "Déploiement" },
               ].map(({ id, label }) => (
                 <button key={id} onClick={() => setServerSubTab(id)} style={{
-                  padding: "9px 16px", fontSize: 12, fontWeight: serverSubTab === id ? 700 : 400,
+                  padding: isMobile ? "8px 12px" : "9px 16px", fontSize: isMobile ? 11 : 12, fontWeight: serverSubTab === id ? 700 : 400,
                   color: serverSubTab === id ? "#818CF8" : "#6B7280",
                   background: "transparent", border: "none", borderBottom: serverSubTab === id ? "2px solid #818CF8" : "2px solid transparent",
-                  cursor: "pointer", transition: "color 0.15s",
+                  cursor: "pointer", transition: "color 0.15s", whiteSpace: "nowrap", flexShrink: 0,
                 }}>{label}</button>
               ))}
             </div>
           )}
           <main style={{ flex: 1, padding: activeModule === "workflows" || activeModule === "impacts" ? 0 : "20px 24px 48px", overflowY: activeModule === "workflows" || activeModule === "impacts" ? "hidden" : "auto", display: "flex", flexDirection: "column" }}>
-            {activeModule === "dashboard" && <DashboardPage groups={groups} allUrls={allUrls} allServers={allServers} incidentLog={incidentLog} capacitySettings={capacitySettings} />}
-            {activeModule === "servers"   && serverSubTab === "inventory" && <ServersView />}
+            {activeModule === "dashboard" && <DashboardPage groups={groups} allUrls={allUrls} allServers={filteredServers} incidentLog={incidentLog} capacitySettings={capacitySettings} />}
+            {activeModule === "servers"   && serverSubTab === "inventory" && <ServersView servers={filteredServers} />}
             {activeModule === "servers"   && serverSubTab === "agents"    && <AgentsView />}
             {activeModule === "servers"   && serverSubTab === "config"    && <VpsAgentsConfig />}
-            {activeModule === "servers"   && serverSubTab === "deploy"    && <AgentDeployMass />}
-            {activeModule === "capacity"  && <CapacityPlanning />}
-            {activeModule === "todo"      && <TodoList servers={allServers} allUrls={allUrls} />}
+            {activeModule === "servers"   && serverSubTab === "deploy"    && <AgentDeployMass servers={filteredServers} />}
+            {activeModule === "capacity"  && <CapacityPlanning servers={filteredServers} />}
+            {activeModule === "todo"      && <TodoList servers={filteredServers} allUrls={allUrls} />}
             {activeModule === "workflows" && <WorkflowEditor />}
-            {activeModule === "impacts"   && <AppImpactMap />}
+            {activeModule === "impacts"   && <AppImpactMap servers={filteredServers} />}
           </main>
         </div>
       )}
@@ -851,7 +858,7 @@ export default function App() {
               allUrls={allUrls}
               incidentLog={incidentLog}
               setIncidentLog={setIncidentLog}
-              allServers={allServers}
+              allServers={filteredServers}
               onNavigate={(mod) => { setActiveModule(mod); setMainTab("surveillance"); }}
             />
           )}

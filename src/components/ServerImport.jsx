@@ -30,10 +30,13 @@ function parseAppName(serviceName, cloudName, environment) {
   const norm = s => s.trim().toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
   const firstMatch = cloudName && norm(parts[0]) === norm(cloudName);
   const lastMatch  = environment && norm(parts[parts.length - 1]) === norm(environment);
+  /* Détection des environnements connus par mot-clé (même si environment est null/différent) */
+  const ENV_KEYWORDS = /^(PROD|PRODUCTION|RECETTE|UAT|QUALIF|STAGING|PREPROD|DEV|DEVELOPPEMENT|TEST|INTEGRATION|INTEG|QA)$/i;
+  const lastIsEnv = lastMatch || ENV_KEYWORDS.test(parts[parts.length - 1]);
   /* Heuristique : 3 parties + dernier = environnement connu → la 1ère est un préfixe organisation
      (couvre le cas cloudName = null ou sans accent correspondant) */
-  const skipFirst = firstMatch || (parts.length >= 3 && lastMatch);
-  const middle = parts.slice(skipFirst ? 1 : 0, lastMatch ? -1 : undefined);
+  const skipFirst = firstMatch || (parts.length >= 3 && lastIsEnv);
+  const middle = parts.slice(skipFirst ? 1 : 0, lastIsEnv ? -1 : undefined);
   return middle.join(" - ") || serviceName;
 }
 
@@ -244,7 +247,7 @@ const TEMPLATE_ROWS = [
   { Name: "REDIS-CACHE-01",Type: "Debian 12",             Statut: "Running",     CPU: 25, RAM: 32,  Stockage: 64,   IP: "10.10.1.40", Service: "Session Store", Environnement: "Production", creationTime: "2023-03-08" },
 ];
 
-export default function ServerImport() {
+export default function ServerImport({ isMobile = false }) {
   const fileRef = useRef(null);
   const [msg, setMsg] = useState(null);
   const [showApi, setShowApi] = useState(false);
@@ -352,16 +355,17 @@ export default function ServerImport() {
   };
 
   const btn = (color) => ({
-    display: "flex", alignItems: "center", gap: 6, padding: "7px 14px", borderRadius: 9,
+    display: "flex", alignItems: "center", gap: isMobile ? 4 : 6, padding: isMobile ? "5px 8px" : "7px 14px", borderRadius: 9,
     background: `${color}14`, border: `1px solid ${color}38`, color,
-    fontSize: 12, fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap",
+    fontSize: isMobile ? 11 : 12, fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap",
     transition: "background 0.15s",
   });
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 8, alignItems: "flex-end" }}>
-      <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", justifyContent: "flex-end" }}>
+    <div style={{ display: "flex", flexDirection: "column", gap: isMobile ? 6 : 8, alignItems: "flex-end" }}>
+      <div style={{ display: "flex", gap: isMobile ? 5 : 8, alignItems: "center", flexWrap: "wrap", justifyContent: "flex-end" }}>
         {/* Source actuelle */}
+        {!isMobile && (
         <span style={{
           fontSize: 10, padding: "3px 10px", borderRadius: 12,
           background: meta.source === "demo" ? "rgba(255,255,255,0.05)" : "rgba(52,211,153,0.1)",
@@ -371,20 +375,21 @@ export default function ServerImport() {
           {meta.source === "demo" ? "Données de démo" :
             meta.source === "excel" ? `Excel : ${meta.label}` : `ITCare : ${meta.label}`}
         </span>
+        )}
 
         <input ref={fileRef} type="file" accept=".xlsx,.xls,.csv" onChange={handleFile} style={{ display: "none" }} />
         <button style={btn("#34D399")} onClick={() => fileRef.current?.click()} title="Importer un inventaire serveurs (.xlsx)">
-          <FileSpreadsheet size={13} /> Importer Excel
+          <FileSpreadsheet size={isMobile ? 14 : 13} />{!isMobile && " Importer Excel"}
         </button>
         <button style={btn("#818CF8")} onClick={() => { setShowApi(v => !v); setInspect(null); }} title="Charger depuis l'API ITCare">
-          <Plug size={13} /> ITCare
+          <Plug size={isMobile ? 14 : 13} />{!isMobile && " ITCare"}
         </button>
         <button style={btn("#6B7280")} onClick={downloadTemplate} title="Télécharger le modèle Excel">
-          <Download size={13} /> Modèle
+          <Download size={isMobile ? 14 : 13} />{!isMobile && " Modèle"}
         </button>
         {meta.source !== "demo" && !confirmReset && (
           <button style={btn("#F87171")} onClick={() => setConfirmReset(true)} title="Supprimer tous les serveurs importés">
-            <RotateCcw size={13} /> Effacer
+            <RotateCcw size={isMobile ? 14 : 13} />{!isMobile && " Effacer"}
           </button>
         )}
         {confirmReset && (

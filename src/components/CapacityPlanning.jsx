@@ -189,8 +189,9 @@ function PlanActionModal({ reco, servers, onClose }) {
   );
 }
 
-export default function CapacityPlanning() {
-  const servers = useSyncExternalStore(subscribeServers, getServers);
+export default function CapacityPlanning({ servers: propServers }) {
+  const storeServers = useSyncExternalStore(subscribeServers, getServers);
+  const servers = propServers || storeServers;
   const snapshots = useMemo(() => loadSnapshots(), [servers]);
   const [metric, setMetric] = useState("cpu");
   const [selectedServer, setSelectedServer] = useState(null);

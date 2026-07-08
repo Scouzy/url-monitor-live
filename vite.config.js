@@ -652,17 +652,18 @@ function itcarePlugin() {
             }
 
             /* ── Stratégie d'enrichissement optimisée ─────────────────────────────────
-               - Details + Storage en parallèle (endpoints distincts, pas de conflit)
-               - enrichWithSnapshots supprimé (retourne toujours 0/237, overhead inutile)
+               - Details + Storage + Snapshots en parallèle (endpoints distincts, pas de conflit)
                - Monitoring séquentiel conservé (évite le throttling côté API ITCare) */
             const _t0 = Date.now();
-            const [withDetails, withStorage] = await Promise.all([
+            const [withDetails, withStorage, withSnapshots] = await Promise.all([
               enrichWithDetails([...resources], token),
               enrichWithStorage([...resources], token),
+              enrichWithSnapshots([...resources], token),
             ]);
             resources = withDetails.map((r, i) => ({
               ...r,
               ...(withStorage[i]?._storage ? { _storage: withStorage[i]._storage } : {}),
+              ...(withSnapshots[i]?._snapshots ? { _snapshots: withSnapshots[i]._snapshots } : {}),
             }));
             resources = await enrichWithMonitoring(resources, token);
             console.log(`\x1b[36m[ITCare]\x1b[0m Enrichissement total terminé en ${Date.now() - _t0}ms`);
@@ -672,6 +673,9 @@ function itcarePlugin() {
               console.log(`\x1b[36m[ITCare]\x1b[0m Apr\u00e8s enrichissement : ram=${s2.ram} | cpu=${s2.cpu} | storage=${s2.storage} | backup=${JSON.stringify(s2.backup)} | patchGroup=${s2.patchParty?.patchGroup}`);
               const s3 = resources.find(r => r._monitoring?.cpuPct != null) || resources[0];
               console.log(`\x1b[36m[ITCare]\x1b[0m Monitoring : cpuPct=${s3._monitoring?.cpuPct} | ramPct=${s3._monitoring?.ramPct} | ramUsedGb=${s3._monitoring?.ramUsedGb}`);
+              const withStorage = resources.filter(r => r._storage?.fileSystems?.length > 0).length;
+              const withSnapshots = resources.filter(r => Array.isArray(r._snapshots) && r._snapshots.length > 0).length;
+              console.log(`\x1b[36m[ITCare]\x1b[0m Volumes : ${withStorage}/${resources.length} serveurs | Snapshots : ${withSnapshots}/${resources.length} serveurs`);
             }
 
             res.end(JSON.stringify({
