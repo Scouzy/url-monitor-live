@@ -128,7 +128,7 @@ const MODULES = [
   { id: "journal",    label: "Journal",           Icon: AlertTriangle },
   { id: "workflows",  label: "Workflows",         Icon: GitBranch },
   { id: "todo",       label: "TodoList",          Icon: ClipboardList },
-  { id: "mep",        label: "MEP",               Icon: Wrench },
+  { id: "intervention", label: "Intervention",       Icon: Wrench },
   { id: "parametres", label: "Paramètres",        Icon: Settings },
 ];
 

@@ -909,16 +909,29 @@ function itcarePlugin() {
             function normalizeTicket(t, isIntervention) {
               const id        = t.id || t.ticketId || t.requestId || t.number || '';
               const subject   = t.subject || t.title || t.summary || t.name || t.description || t.shortDescription || '';
-              const status    = (t.status || t.state || t.lifecycleStatus || t.workflowStatus || '').toLowerCase();
-              const priority  = (t.priority || t.urgency || t.severity || '').toLowerCase();
+              const status    = (t.status || t.state || t.lifecycleStatus || t.workflowStatus || t.statusLabel || '').toLowerCase();
+              const priority  = (t.priority || t.urgency || t.severity || t.impact || t.impactLevel || t.criticality || t.priorityLabel || t.urgencyLevel || '').toLowerCase();
               const type      = t.type || t.ticketType || t.category || t.class || t.requestType || '';
-              const createdAt = t.createdAt || t.creationDate || t.openedAt || t.createdDate || t.openDate || null;
-              const updatedAt = t.updatedAt || t.lastUpdate || t.modifiedAt || t.lastModifiedDate || null;
-              const closedAt  = t.closedAt || t.resolutionDate || t.closeDate || t.resolvedAt || null;
-              const assignee  = t.assignee || t.assignedTo || t.responsible || t.owner || t.assignedToName || '';
-              const requester = t.requester || t.requestedBy || t.client || t.submitter || t.requesterName || t.createdBy || '';
-              const service   = t.service || t.serviceName || t.application || t.affectedService || '';
+              const createdAt = t.createdAt || t.creationDate || t.openedAt || t.createdDate || t.openDate || t.creationTime || t.submitDate || null;
+              const updatedAt = t.updatedAt || t.lastUpdate || t.modifiedAt || t.lastModifiedDate || t.updateDate || null;
+              const closedAt  = t.closedAt || t.resolutionDate || t.closeDate || t.resolvedAt || t.resolutionTime || null;
+              const assignee  = t.assignee || t.assignedTo || t.responsible || t.owner || t.assignedToName || t.assigneeName || '';
+              const requester = t.requester || t.requestedBy || t.client || t.submitter || t.requesterName || t.createdBy || t.requesterFullName || '';
+              let service     = t.service || t.serviceName || t.application || t.affectedService || t.serviceLabel || t.servicePath || t.affectedCI || t.ciName || t.businessService || t.resource || t.resourceName || '';
               const env       = t.environment || t.env || t.environmentName || '';
+
+              /* Déduire le service depuis le sujet si vide (ex: "[G1Oeil] MEP en PROD" → "G1Oeil") */
+              if (!service && subject) {
+                const bracketMatch = subject.match(/^\[([^\]]+)\]/);
+                if (bracketMatch) {
+                  service = bracketMatch[1].trim();
+                } else {
+                  const dashMatch = subject.match(/^([^-]+)\s*[-–—]/);
+                  if (dashMatch && dashMatch[1].trim().length < 40) {
+                    service = dashMatch[1].trim();
+                  }
+                }
+              }
 
               const idStr = String(id);
               const displayId = isIntervention ? `+${idStr.replace(/^\+/, '')}` : `⚠${idStr}`;
@@ -934,6 +947,15 @@ function itcarePlugin() {
             const normalized = [...normalizedDemandes, ...normalizedIncidents];
 
             console.log(`\x1b[36m[ITCare]\x1b[0m Tickets : ${normalized.length} récupérés (${normalizedDemandes.length} demandes/interventions, ${normalizedIncidents.length} incidents)`);
+
+            /* Debug : afficher les champs bruts des 3 premiers tickets */
+            if (normalized.length > 0) {
+              console.log(`\x1b[36m[ITCare]\x1b[0m Debug - 3 premiers tickets normalisés:`);
+              normalized.slice(0, 3).forEach((t, i) => {
+                console.log(`  [${i}] id=${t.id} priority="${t.priority}" service="${t.service}" status="${t.status}" subject="${(t.subject || '').slice(0, 60)}" createdAt="${t.createdAt}"`);
+                console.log(`       raw keys: ${Object.keys(t.raw || {}).join(', ')}`);
+              });
+            }
 
             res.end(JSON.stringify({
               tickets: normalized,

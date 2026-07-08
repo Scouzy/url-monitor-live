@@ -20,6 +20,8 @@ import AgentsView from "./components/AgentsView";
 import VpsAgentsConfig from "./components/VpsAgentsConfig";
 import AgentDeployMass from "./components/AgentDeployMass";
 import MEPView from "./components/MEPView";
+import InterventionStats from "./components/InterventionStats";
+import IncidentStats from "./components/IncidentStats";
 import SettingsPage from "./components/SettingsPage";
 import DashboardPage from "./components/DashboardPage";
 import { subscribeServers, getServers, setServers, getServersMeta, recommendations as getRecos, patchServerMetrics, refreshFromStorage, subscribeAppFilter, getAppFilter } from "./utils/servers";
@@ -50,6 +52,11 @@ export default function App() {
   const [mainTab, setMainTab] = useState(() => localStorage.getItem("g1oeil_tab") || "surveillance");
   const [activeModule, setActiveModule] = useState(() => localStorage.getItem("g1oeil_module") || "dashboard");
   const [serverSubTab, setServerSubTab] = useState("inventory");
+  const [interventionSubTab, setInterventionSubTab] = useState("tickets");
+  const [itcareTickets, setItcareTickets] = useState([]);
+  const [itcareLoading, setItcareLoading] = useState(false);
+  const [itcareError, setItcareError] = useState(null);
+  const [itcareLastLoad, setItcareLastLoad] = useState(null);
   const [agentInterval, setAgentInterval] = useState(() => parseInt(localStorage.getItem("g1oeil_agent_interval") || "30"));
   const [agentCountdown, setAgentCountdown] = useState(() => parseInt(localStorage.getItem("g1oeil_agent_interval") || "30"));
   const [notifEnabled, setNotifEnabled] = useState(() => typeof Notification !== "undefined" && Notification.permission === "granted");
@@ -65,6 +72,45 @@ export default function App() {
   const [todoBadge, setTodoBadge] = useState(() => loadTodos().filter(t => t.status !== "done").length);
 
   useEffect(() => { localStorage.setItem("g1oeil_module", activeModule); }, [activeModule]);
+
+  /* ── Fetch ITCare tickets : au lancement + sur Actualiser ── */
+  const refreshItcareTickets = useCallback(async () => {
+    let config = null;
+    try { config = JSON.parse(localStorage.getItem("capacity-itcare-config")); } catch {}
+    if (!config) { setItcareError("Configurez l'authentification ITCare dans Serveurs > Inventaire > ITCare"); return; }
+    let body;
+    if (config.authMode === "credentials" && config.clientId && config.clientSecret) {
+      body = { clientId: config.clientId, clientSecret: config.clientSecret };
+    } else if (config.authMode === "token" && config.token) {
+      body = { token: config.token };
+    } else {
+      setItcareError("Authentification ITCare manquante");
+      return;
+    }
+    setItcareLoading(true);
+    setItcareError(null);
+    try {
+      const res = await fetch("/api/itcare-tickets", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || `HTTP ${res.status}`);
+      setItcareTickets(json.tickets || []);
+      setItcareLastLoad(Date.now());
+      if (json.message) setItcareError(json.message);
+    } catch (err) {
+      setItcareError(err.message);
+    } finally {
+      setItcareLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    const config = localStorage.getItem("capacity-itcare-config");
+    if (config) refreshItcareTickets();
+  }, [refreshItcareTickets]);
 
   /* ── Détection mobile / resize ── */
   useEffect(() => {
@@ -554,13 +600,13 @@ export default function App() {
               <h1 style={{ fontSize: isMobile ? 14 : 16, fontWeight: 700, color: "#F9FAFB", margin: 0 }}>
                 {activeModule === "servers"
                   ? ({ inventory: "Inventaire serveurs", agents: "Agents VPS", config: "Configuration agents", deploy: "Déploiement en masse" }[serverSubTab] || "Serveurs")
-                  : ({ dashboard: "Dashboard", capacity: "Capacity Planning", todo: "TodoList", mep: "Mises en production", workflows: "Workflows", impacts: "Impacts Applicatifs", journal: "Journal des alertes", parametres: "Paramètres" }[activeModule] || activeModule)}
+                  : ({ dashboard: "Dashboard", capacity: "Capacity Planning", todo: "TodoList", intervention: "Interventions", workflows: "Workflows", impacts: "Impacts Applicatifs", journal: "Journal des alertes", parametres: "Paramètres" }[activeModule] || activeModule)}
               </h1>
               {!isMobile && (
               <p style={{ fontSize: 11, color: "#4B5563", margin: 0 }}>
                 {activeModule === "servers"
                   ? ({ inventory: "CPU, RAM et disque en temps réel par serveur", agents: "Supervision temps réel · Linux & Windows · CPU / RAM / Disque / Réseau / Processus / Répertoires", config: "Ajouter · modifier · tester les agents VPS · télécharger les scripts", deploy: "Scripts pré-remplis SSH · WinRM · Ansible pour déployer les agents sur tout l'inventaire" }[serverSubTab] || "")
-                  : ({ dashboard: "Vue synthetique - KPIs - alertes - SSL - performance", capacity: "Projections 6 mois · seuil critique 90% · recommandations", todo: "Tâches en cours · auto-générées + manuelles", mep: "Tickets d'intervention et mises en production depuis ITCare", workflows: "Création et gestion de procédures d'intervention pas à pas", impacts: "Cartographie des dépendances entre applications et serveurs", journal: "Historique des événements · pannes · SSL · serveurs", parametres: "Configuration de l'application" }[activeModule] || "")}
+                  : ({ dashboard: "Vue synthetique - KPIs - alertes - SSL - performance", capacity: "Projections 6 mois · seuil critique 90% · recommandations", todo: "Tâches en cours · auto-générées + manuelles", intervention: "Tickets d'intervention et mises en production depuis ITCare", workflows: "Création et gestion de procédures d'intervention pas à pas", impacts: "Cartographie des dépendances entre applications et serveurs", journal: "Historique des événements · pannes · SSL · serveurs", parametres: "Configuration de l'application" }[activeModule] || "")}
               </p>
               )}
               </div>
@@ -608,6 +654,23 @@ export default function App() {
               ))}
             </div>
           )}
+          {/* Sous-onglets Intervention */}
+          {activeModule === "intervention" && (
+            <div style={{ display: "flex", gap: 4, padding: isMobile ? "0 12px" : "0 24px", borderBottom: "1px solid rgba(255,255,255,0.06)", background: "rgba(255,255,255,0.01)", overflowX: "auto", WebkitOverflowScrolling: "touch" }}>
+              {[
+                { id: "tickets",   label: "Tickets" },
+                { id: "stats",     label: isMobile ? "Stats Inter." : "Stats Interventions" },
+                { id: "incidents", label: isMobile ? "Stats Inc." : "Stats Incidents" },
+              ].map(({ id, label }) => (
+                <button key={id} onClick={() => setInterventionSubTab(id)} style={{
+                  padding: isMobile ? "8px 12px" : "9px 16px", fontSize: isMobile ? 11 : 12, fontWeight: interventionSubTab === id ? 700 : 400,
+                  color: interventionSubTab === id ? "#818CF8" : "#6B7280",
+                  background: "transparent", border: "none", borderBottom: interventionSubTab === id ? "2px solid #818CF8" : "2px solid transparent",
+                  cursor: "pointer", transition: "color 0.15s", whiteSpace: "nowrap", flexShrink: 0,
+                }}>{label}</button>
+              ))}
+            </div>
+          )}
           <main style={{ flex: 1, padding: activeModule === "workflows" || activeModule === "impacts" ? 0 : "20px 24px 48px", overflowY: activeModule === "workflows" || activeModule === "impacts" ? "hidden" : "auto", display: "flex", flexDirection: "column" }}>
             {activeModule === "dashboard" && <DashboardPage groups={groups} allUrls={allUrls} allServers={filteredServers} incidentLog={incidentLog} capacitySettings={capacitySettings} />}
             {activeModule === "servers"   && serverSubTab === "inventory" && <ServersView servers={filteredServers} />}
@@ -616,7 +679,9 @@ export default function App() {
             {activeModule === "servers"   && serverSubTab === "deploy"    && <AgentDeployMass servers={filteredServers} />}
             {activeModule === "capacity"  && <CapacityPlanning servers={filteredServers} />}
             {activeModule === "todo"      && <TodoList servers={filteredServers} allUrls={allUrls} />}
-            {activeModule === "mep"       && <MEPView isMobile={isMobile} />}
+            {activeModule === "intervention" && interventionSubTab === "tickets" && <MEPView isMobile={isMobile} tickets={itcareTickets} loading={itcareLoading} error={itcareError} lastLoad={itcareLastLoad} onRefresh={refreshItcareTickets} />}
+            {activeModule === "intervention" && interventionSubTab === "stats"     && <InterventionStats isMobile={isMobile} tickets={itcareTickets} loading={itcareLoading} error={itcareError} lastLoad={itcareLastLoad} onRefresh={refreshItcareTickets} />}
+            {activeModule === "intervention" && interventionSubTab === "incidents"  && <IncidentStats isMobile={isMobile} tickets={itcareTickets} loading={itcareLoading} error={itcareError} lastLoad={itcareLastLoad} onRefresh={refreshItcareTickets} />}
             {activeModule === "workflows" && <WorkflowEditor />}
             {activeModule === "impacts"   && <AppImpactMap servers={filteredServers} />}
           </main>

@@ -5,8 +5,6 @@ import {
   Wrench, Ticket, CircleDot, ArrowRight, Zap, LayoutGrid, List,
 } from "lucide-react";
 
-const API_LS_KEY = "capacity-itcare-config";
-
 /* ── Statuts possibles ── */
 const STATUS_META = {
   open:        { label: "Ouvert",      color: "#818CF8", Icon: CircleDot },
@@ -324,57 +322,13 @@ function DetailRow({ icon: Icon, label, value }) {
 }
 
 /* ── Vue principale ── */
-export default function MEPView({ isMobile = false }) {
-  const [tickets, setTickets] = useState([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState(null);
+export default function MEPView({ isMobile = false, tickets = [], loading = false, error = null, lastLoad = null, onRefresh }) {
   const [filterText, setFilterText] = useState("");
   const [filterStatus, setFilterStatus] = useState("all");
   const [filterType, setFilterType] = useState("all");
   const [filterMonth, setFilterMonth] = useState("all");
   const [viewMode, setViewMode] = useState(() => localStorage.getItem("g1oeil_mep_view") || "grid");
   const [expandedId, setExpandedId] = useState(null);
-  const [lastLoad, setLastLoad] = useState(null);
-
-  const fetchTickets = async () => {
-    let config = null;
-    try { config = JSON.parse(localStorage.getItem(API_LS_KEY)); } catch {}
-
-    let body;
-    if (config?.authMode === "credentials" && config.clientId && config.clientSecret) {
-      body = { clientId: config.clientId, clientSecret: config.clientSecret };
-    } else if (config?.authMode === "token" && config.token) {
-      body = { token: config.token };
-    } else {
-      setError("Configurez d'abord l'authentification ITCare dans l'onglet Serveurs > Inventaire > ITCare");
-      return;
-    }
-
-    setLoading(true);
-    setError(null);
-    try {
-      const res = await fetch("/api/itcare-tickets", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
-      const json = await res.json();
-      if (!res.ok) throw new Error(json.error || `HTTP ${res.status}`);
-      setTickets(json.tickets || []);
-      setLastLoad(Date.now());
-      if (json.message) setError(json.message);
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  /* Auto-load au montage si config existe */
-  useEffect(() => {
-    const config = localStorage.getItem(API_LS_KEY);
-    if (config) fetchTickets();
-  }, []); // eslint-disable-line
 
   /* Filtrage */
   const statusFilter = STATUS_FILTERS.find(f => f.id === filterStatus);
@@ -444,7 +398,7 @@ export default function MEPView({ isMobile = false }) {
       {/* ── Barre d'actions ── */}
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
         <button
-          onClick={fetchTickets}
+          onClick={onRefresh}
           disabled={loading}
           style={{
             display: "inline-flex", alignItems: "center", gap: 6, padding: "7px 14px", borderRadius: 9,
