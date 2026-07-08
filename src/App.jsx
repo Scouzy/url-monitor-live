@@ -19,6 +19,7 @@ import AppImpactMap from "./components/AppImpactMap";
 import AgentsView from "./components/AgentsView";
 import VpsAgentsConfig from "./components/VpsAgentsConfig";
 import AgentDeployMass from "./components/AgentDeployMass";
+import MEPView from "./components/MEPView";
 import SettingsPage from "./components/SettingsPage";
 import DashboardPage from "./components/DashboardPage";
 import { subscribeServers, getServers, setServers, getServersMeta, recommendations as getRecos, patchServerMetrics, refreshFromStorage, subscribeAppFilter, getAppFilter } from "./utils/servers";
@@ -553,13 +554,13 @@ export default function App() {
               <h1 style={{ fontSize: isMobile ? 14 : 16, fontWeight: 700, color: "#F9FAFB", margin: 0 }}>
                 {activeModule === "servers"
                   ? ({ inventory: "Inventaire serveurs", agents: "Agents VPS", config: "Configuration agents", deploy: "Déploiement en masse" }[serverSubTab] || "Serveurs")
-                  : ({ dashboard: "Dashboard", capacity: "Capacity Planning", todo: "TodoList", workflows: "Workflows", impacts: "Impacts Applicatifs", journal: "Journal des alertes", parametres: "Paramètres" }[activeModule] || activeModule)}
+                  : ({ dashboard: "Dashboard", capacity: "Capacity Planning", todo: "TodoList", mep: "Mises en production", workflows: "Workflows", impacts: "Impacts Applicatifs", journal: "Journal des alertes", parametres: "Paramètres" }[activeModule] || activeModule)}
               </h1>
               {!isMobile && (
               <p style={{ fontSize: 11, color: "#4B5563", margin: 0 }}>
                 {activeModule === "servers"
                   ? ({ inventory: "CPU, RAM et disque en temps réel par serveur", agents: "Supervision temps réel · Linux & Windows · CPU / RAM / Disque / Réseau / Processus / Répertoires", config: "Ajouter · modifier · tester les agents VPS · télécharger les scripts", deploy: "Scripts pré-remplis SSH · WinRM · Ansible pour déployer les agents sur tout l'inventaire" }[serverSubTab] || "")
-                  : ({ dashboard: "Vue synthetique - KPIs - alertes - SSL - performance", capacity: "Projections 6 mois · seuil critique 90% · recommandations", todo: "Tâches en cours · auto-générées + manuelles", workflows: "Création et gestion de procédures d'intervention pas à pas", impacts: "Cartographie des dépendances entre applications et serveurs", journal: "Historique des événements · pannes · SSL · serveurs", parametres: "Configuration de l'application" }[activeModule] || "")}
+                  : ({ dashboard: "Vue synthetique - KPIs - alertes - SSL - performance", capacity: "Projections 6 mois · seuil critique 90% · recommandations", todo: "Tâches en cours · auto-générées + manuelles", mep: "Tickets d'intervention et mises en production depuis ITCare", workflows: "Création et gestion de procédures d'intervention pas à pas", impacts: "Cartographie des dépendances entre applications et serveurs", journal: "Historique des événements · pannes · SSL · serveurs", parametres: "Configuration de l'application" }[activeModule] || "")}
               </p>
               )}
               </div>
@@ -615,6 +616,7 @@ export default function App() {
             {activeModule === "servers"   && serverSubTab === "deploy"    && <AgentDeployMass servers={filteredServers} />}
             {activeModule === "capacity"  && <CapacityPlanning servers={filteredServers} />}
             {activeModule === "todo"      && <TodoList servers={filteredServers} allUrls={allUrls} />}
+            {activeModule === "mep"       && <MEPView isMobile={isMobile} />}
             {activeModule === "workflows" && <WorkflowEditor />}
             {activeModule === "impacts"   && <AppImpactMap servers={filteredServers} />}
           </main>

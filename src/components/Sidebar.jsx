@@ -2,7 +2,7 @@ import { useState, useRef } from "react";
 import {
   ChevronLeft, ChevronRight, Menu, Plus, Folder, FolderOpen,
   Trash2, Activity, Check, X, Globe, Download, Upload,
-  Server, BarChart3, MonitorCheck, AlertTriangle, Settings, ClipboardList, GitBranch, Network, LayoutDashboard,
+  Server, BarChart3, MonitorCheck, AlertTriangle, Settings, ClipboardList, GitBranch, Network, LayoutDashboard, Wrench,
 } from "lucide-react";
 import { getStatus, STATUS } from "../constants";
 import { importGroupsJson, importGroupsArray } from "../utils/storage";
@@ -128,6 +128,7 @@ const MODULES = [
   { id: "journal",    label: "Journal",           Icon: AlertTriangle },
   { id: "workflows",  label: "Workflows",         Icon: GitBranch },
   { id: "todo",       label: "TodoList",          Icon: ClipboardList },
+  { id: "mep",        label: "MEP",               Icon: Wrench },
   { id: "parametres", label: "Paramètres",        Icon: Settings },
 ];
 

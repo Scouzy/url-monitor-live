@@ -787,6 +787,167 @@ function itcarePlugin() {
         });
       });
 
+      /* ── /api/itcare-tickets : tickets d'intervention et tickets standards ── */
+      server.middlewares.use('/api/itcare-tickets', (req, res) => {
+        res.setHeader('Content-Type', 'application/json');
+        res.setHeader('Access-Control-Allow-Origin', '*');
+        res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+        if (req.method === 'OPTIONS') { res.statusCode = 204; return res.end(); }
+        if (req.method !== 'POST')    { res.statusCode = 405; return res.end(JSON.stringify({ error: 'POST requis' })); }
+
+        let body = '';
+        req.on('data', d => { body += d; });
+        req.on('end', async () => {
+          try {
+            const parsed = parseAuthToken(JSON.parse(body || '{}'));
+            if (!parsed) return res.end(JSON.stringify({ error: 'Auth manquante' }));
+            const token = parsed.mode === 'token' ? parsed.value : await getToken(parsed.clientId, parsed.clientSecret);
+
+            /* Endpoint ITCare pour les tickets : /user-preferences/itcare.support.search
+               puis /support/search avec le content-type spécifique vnd.cegedim-it.v1+json
+               Les tickets ITCare sont séparés en 2 types :
+               - Demandes (Requests) : interventions planifiées, MEP, déploiements → préfixe +
+               - Incidents (Tickets) : pannes, problèmes non planifiés → préfixe ⚠ */
+            const ITCARE_HEADERS = {
+              'Authorization': `Bearer ${token}`,
+              'Accept': 'application/vnd.cegedim-it.v1+json',
+              'Content-Type': 'application/vnd.cegedim-it.v1+json',
+              'Accept-Language': 'fr-FR,fr;q=0.9',
+            };
+
+            /* 1. Récupérer les préférences de recherche */
+            try {
+              const prefRes = await fetch(`${API_BASE}/user-preferences/itcare.support.search`, {
+                headers: ITCARE_HEADERS,
+                signal: AbortSignal.timeout(8000),
+              });
+              if (prefRes.ok) {
+                const prefData = await prefRes.json();
+                console.log(`\x1b[36m[ITCare]\x1b[0m Tickets : préférences de recherche récupérées`, JSON.stringify(prefData).slice(0, 200));
+              }
+            } catch (e) {
+              console.log(`\x1b[33m[ITCare]\x1b[0m Préférences search indisponibles : ${e.message}`);
+            }
+
+            /* 2. Interroger séparément les demandes et les incidents */
+            const DEMANDE_PATHS = [
+              '/support/requests',
+              '/support/requests/search',
+              '/ticketing/requests',
+              '/requests',
+            ];
+            const INCIDENT_PATHS = [
+              '/support/incidents',
+              '/support/incidents/search',
+              '/ticketing/incidents',
+              '/incidents',
+            ];
+            /* Paths génériques (fallback si les spécifiques ne répondent pas) */
+            const GENERIC_PATHS = [
+              '/support/search',
+              '/support/tickets',
+              '/ticketing/tickets',
+              '/ticketing/search',
+            ];
+
+            async function tryFetchPaths(paths, label) {
+              for (const path of paths) {
+                try {
+                  const r = await fetch(`${API_BASE}${path}?page=0&size=50`, {
+                    headers: ITCARE_HEADERS,
+                    signal: AbortSignal.timeout(10000),
+                  });
+                  if (r.ok) {
+                    const data = await r.json();
+                    const arr = Array.isArray(data) ? data : (data.content || data.tickets || data.items || data.results || data.requests || data.incidents || []);
+                    if (arr.length > 0 || data.totalElements != null) {
+                      console.log(`\x1b[36m[ITCare]\x1b[0m ${label} : endpoint ${path} disponible (${arr.length} items)`);
+                      if (data.totalPages && data.totalPages > 1) {
+                        return await fetchAllPages(token, `${API_BASE}${path}`);
+                      }
+                      return arr;
+                    }
+                  }
+                } catch {}
+              }
+              return null;
+            }
+
+            let demandes = await tryFetchPaths(DEMANDE_PATHS, 'Demandes');
+            let incidents = await tryFetchPaths(INCIDENT_PATHS, 'Incidents');
+
+            /* Fallback : endpoint générique + classification par champ type */
+            let usedPath = null;
+            if (!demandes && !incidents) {
+              const generic = await tryFetchPaths(GENERIC_PATHS, 'Tickets génériques');
+              if (generic && generic.length > 0) {
+                usedPath = GENERIC_PATHS.find(p => { /* juste pour logger */ }) || '/support/search';
+                console.log(`\x1b[36m[ITCare]\x1b[0m Tickets génériques : ${generic.length} items, classification par champ type`);
+                /* Classifier selon les champs de l'API */
+                demandes = generic.filter(t => {
+                  const typeStr = String(t.type || t.ticketType || t.category || t.class || t.requestType || '').toLowerCase();
+                  return typeStr.includes('request') || typeStr.includes('demande') || typeStr.includes('intervention') || typeStr.includes('mep') || typeStr.includes('deployment') || typeStr.includes('change');
+                });
+                incidents = generic.filter(t => {
+                  const typeStr = String(t.type || t.ticketType || t.category || t.class || t.requestType || '').toLowerCase();
+                  return typeStr.includes('incident') || typeStr.includes('ticket') || typeStr.includes('problem') || typeStr.includes('issue') || typeStr.includes('panne');
+                });
+                /* Si la classification par type échoue, tout mettre dans incidents sauf si l'ID commence par + */
+                if (demandes.length === 0 && incidents.length === 0) {
+                  demandes = generic.filter(t => String(t.id || t.number || '').startsWith('+'));
+                  incidents = generic.filter(t => !String(t.id || t.number || '').startsWith('+'));
+                }
+              }
+            }
+
+            if ((!demandes || demandes.length === 0) && (!incidents || incidents.length === 0)) {
+              console.log('\x1b[33m[ITCare]\x1b[0m Aucun endpoint tickets trouvé.');
+              return res.end(JSON.stringify({ tickets: [], total: 0, message: 'Aucun endpoint tickets disponible' }));
+            }
+
+            /* Normaliser les tickets */
+            function normalizeTicket(t, isIntervention) {
+              const id        = t.id || t.ticketId || t.requestId || t.number || '';
+              const subject   = t.subject || t.title || t.summary || t.name || t.description || t.shortDescription || '';
+              const status    = (t.status || t.state || t.lifecycleStatus || t.workflowStatus || '').toLowerCase();
+              const priority  = (t.priority || t.urgency || t.severity || '').toLowerCase();
+              const type      = t.type || t.ticketType || t.category || t.class || t.requestType || '';
+              const createdAt = t.createdAt || t.creationDate || t.openedAt || t.createdDate || t.openDate || null;
+              const updatedAt = t.updatedAt || t.lastUpdate || t.modifiedAt || t.lastModifiedDate || null;
+              const closedAt  = t.closedAt || t.resolutionDate || t.closeDate || t.resolvedAt || null;
+              const assignee  = t.assignee || t.assignedTo || t.responsible || t.owner || t.assignedToName || '';
+              const requester = t.requester || t.requestedBy || t.client || t.submitter || t.requesterName || t.createdBy || '';
+              const service   = t.service || t.serviceName || t.application || t.affectedService || '';
+              const env       = t.environment || t.env || t.environmentName || '';
+
+              const idStr = String(id);
+              const displayId = isIntervention ? `+${idStr.replace(/^\+/, '')}` : `⚠${idStr}`;
+
+              return {
+                id: idStr, displayId, isIntervention, subject, status, priority, type,
+                createdAt, updatedAt, closedAt, assignee, requester, service, env, raw: t,
+              };
+            }
+
+            const normalizedDemandes = (demandes || []).map(t => normalizeTicket(t, true));
+            const normalizedIncidents = (incidents || []).map(t => normalizeTicket(t, false));
+            const normalized = [...normalizedDemandes, ...normalizedIncidents];
+
+            console.log(`\x1b[36m[ITCare]\x1b[0m Tickets : ${normalized.length} récupérés (${normalizedDemandes.length} demandes/interventions, ${normalizedIncidents.length} incidents)`);
+
+            res.end(JSON.stringify({
+              tickets: normalized,
+              total: normalized.length,
+              endpoint: usedPath,
+            }));
+          } catch (e) {
+            _tokenCache = null;
+            res.statusCode = 500;
+            res.end(JSON.stringify({ error: e.message }));
+          }
+        });
+      });
+
     },
   };
 }
