@@ -376,10 +376,22 @@ function loadPersisted() {
     if (!Array.isArray(rows) || rows.length === 0) return null;
     _meta = parsed.meta || { source: "excel", loadedAt: null, label: null };
     /* Re-normalisation + fallback métriques depuis snapshot (évite les défauts 30/40/35) */
-    const normalized = applyMetricsFallback(rows, _meta.source).map((s, i) => ({
-      source: s.source || _meta.source || "import",
-      ...normalizeServer(s, i),
-    }));
+    const normalized = applyMetricsFallback(rows, _meta.source).map((s, i) => {
+      const n = normalizeServer(s, i);
+      /* Préserver l'historique réel accumulé s'il existe dans les données persistées */
+      const persistedHist = s.history24h;
+      if (persistedHist && Array.isArray(persistedHist) && persistedHist.length > 0) {
+        n.history24h = persistedHist;
+      } else {
+        /* Remplacer le dernier point simulé "23h" par un timestamp réel */
+        const now = new Date();
+        n.history24h = [...n.history24h.slice(0, -1), {
+          h: now.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit", second: "2-digit" }),
+          cpu: n.cpu, ram: n.ram, disk: n.disk,
+        }];
+      }
+      return { source: s.source || _meta.source || "import", ...n };
+    });
     return dedupeByName(normalized); /* élimine doublons persistés avant de peupler le cache */
   } catch { return null; }
 }
@@ -406,11 +418,24 @@ export function getServersMeta() { return _meta; }
 export function setServers(rawList, source, label) {
   /* Dédupliquer les lignes brutes avant normalisation (doublons ITCare ou Excel) */
   const uniqueRaw = dedupeByName(rawList);
-  const servers = applyMetricsFallback(uniqueRaw, source).map((row, i) => ({
-    source,                       /* origine du chargement (api, excel, …) */
-    ...normalizeServer(row, i),
-    ...(row.source ? { source: row.source } : {}), /* préserver source vps-agent si déjà posée */
-  }));
+  const servers = applyMetricsFallback(uniqueRaw, source).map((row, i) => {
+    const normalized = normalizeServer(row, i);
+    /* Préserver l'historique accumulé si le serveur existait déjà */
+    const existing = _cache?.find(s => s.name === normalized.name || s.id === normalized.id);
+    if (existing?.history24h?.length > 0) {
+      const now = new Date();
+      const newPoint = {
+        h: now.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit", second: "2-digit" }),
+        cpu: normalized.cpu, ram: normalized.ram, disk: normalized.disk,
+      };
+      normalized.history24h = [...existing.history24h, newPoint].slice(-24);
+    }
+    return {
+      source,
+      ...normalized,
+      ...(row.source ? { source: row.source } : {}),
+    };
+  });
 
   if (servers.length === 0) throw new Error("Aucun serveur valide");
   _cache = servers;
@@ -423,7 +448,7 @@ export function setServers(rawList, source, label) {
     const persistRows = uniqueRaw.map((r, i) => {
       const s = servers[i];
       if (!s) return r;
-      return { ...r, "Utilisation CPU": s.cpu, "Utilisation RAM": s.ram, "Utilisation Disque": s.disk };
+      return { ...r, "Utilisation CPU": s.cpu, "Utilisation RAM": s.ram, "Utilisation Disque": s.disk, history24h: s.history24h };
     });
     localStorage.setItem(LS_KEY, JSON.stringify({ rows: persistRows, meta: _meta }));
   } catch { /* quota */ }
@@ -535,10 +560,24 @@ export function patchServerMetrics(name, metrics) {
   const idx = _cache.findIndex(s => s.name.toLowerCase() === nameKey || s.id === idKey);
   if (idx >= 0) {
     const growthRate = _cache[idx].growthRate || defGrow;
-    const { history24h, monthly } = buildSeries(base, growthRate, strSeed(name));
+    const { monthly } = buildSeries(base, growthRate, strSeed(name));
+    /* Accumuler les vraies valeurs dans history24h au lieu de régénérer */
+    const prevHist = _cache[idx].history24h || [];
+    const now = new Date();
+    const newPoint = {
+      h: now.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit", second: "2-digit" }),
+      cpu: base.cpu, ram: base.ram, disk: base.disk,
+    };
+    const history24h = [...prevHist, newPoint].slice(-24);
     _cache = _cache.map((s, i) => i !== idx ? s : { ...s, ...patch, history24h, monthly });
   } else {
-    const { history24h, monthly } = buildSeries(base, defGrow, strSeed(name));
+    const { history24h: simHist, monthly } = buildSeries(base, defGrow, strSeed(name));
+    const now = new Date();
+    const realPoint = {
+      h: now.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit", second: "2-digit" }),
+      cpu: base.cpu, ram: base.ram, disk: base.disk,
+    };
+    const history24h = [...simHist.slice(0, 23), realPoint];
     _cache = dedupeByName([..._cache, {
       id:         `vps-${metrics.hostname || name}`,
       name:       name.trim(), /* trim pour que le findIndex fonctionne sur les appels suivants */

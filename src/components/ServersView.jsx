@@ -1,9 +1,9 @@
-import { useState, useMemo, useSyncExternalStore } from "react";
+import { useState, useMemo, useEffect, useSyncExternalStore } from "react";
 import {
   Server, Search, X, Cpu, MemoryStick, HardDrive, Globe,
   Database, Boxes, Zap, Clock, Network, MonitorCog, Info, AppWindow,
   TrendingUp, AlertTriangle, ChevronDown, Calendar, Activity,
-  Shield, Archive, Layers, Wrench, Check,
+  Shield, Archive, Layers, Wrench, Check, Monitor, Terminal,
 } from "lucide-react";
 import {
   ResponsiveContainer, AreaChart, Area, XAxis, YAxis, Tooltip, CartesianGrid,
@@ -28,7 +28,7 @@ const envColor = (env) => {
   return "#9CA3AF";
 };
 
-function EnvBadge({ env }) {
+export function EnvBadge({ env }) {
   const color = envColor(env);
   return (
     <span style={{
@@ -42,7 +42,7 @@ function EnvBadge({ env }) {
   );
 }
 
-function AppBadge({ app, onClick, active }) {
+export function AppBadge({ app, onClick, active }) {
   return (
     <span
       onClick={onClick ? (e) => { e.stopPropagation(); onClick(); } : undefined}
@@ -62,7 +62,7 @@ function AppBadge({ app, onClick, active }) {
   );
 }
 
-function StatutBadge({ statut }) {
+export function StatutBadge({ statut }) {
   const s = String(statut).toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
   let color, bg;
   if (/running|actif|encours|ok|up|operationnel|active/.test(s)) { color = "#34D399"; bg = "rgba(52,211,153,0.12)"; }
@@ -82,7 +82,36 @@ function StatutBadge({ statut }) {
   );
 }
 
-function RoleBadge({ role }) {
+/* ── Détection OS ── */
+function detectOsType(os) {
+  if (!os || os === "—") return null;
+  const s = os.toLowerCase();
+ if (/windows|winnt|win32|server\s*20/.test(s)) return "windows";
+  if (/linux|ubuntu|debian|centos|rocky|alpine|redhat|rhel|fedora|suse|opensuse|oracle\s*linux|amazon\s*linux/.test(s)) return "linux";
+  return null;
+}
+
+export function OsBadge({ os, size = "sm" }) {
+  const type = detectOsType(os);
+  if (!type) return null;
+  const isWin = type === "windows";
+  const Icon = isWin ? Monitor : Terminal;
+  const color = isWin ? "#60A5FA" : "#FBBF24";
+  const label = isWin ? "Windows" : "Linux";
+  const sz = size === "sm" ? { fontSize: 9, iconSize: 9, padding: "2px 7px" } : { fontSize: 10, iconSize: 11, padding: "3px 9px" };
+  return (
+    <span style={{
+      display: "inline-flex", alignItems: "center", gap: 3,
+      fontSize: sz.fontSize, fontWeight: 700, padding: sz.padding, borderRadius: 6,
+      background: `${color}1A`, border: `1px solid ${color}40`, color,
+      whiteSpace: "nowrap", textTransform: "uppercase", letterSpacing: "0.03em",
+    }}>
+      <Icon size={sz.iconSize} /> {label}
+    </span>
+  );
+}
+
+export function RoleBadge({ role }) {
   const meta = ROLES[role];
   const Icon = ROLE_ICONS[role];
   return (
@@ -101,7 +130,7 @@ function ResourceChart({ data, dataKey, color, label }) {
   return (
     <div style={{ marginBottom: 14 }}>
       <div style={{ fontSize: 11, fontWeight: 600, color: "#9CA3AF", marginBottom: 6, display: "flex", justifyContent: "space-between" }}>
-        <span>{label} — dernières 24h</span>
+        <span>{label} — temps réel</span>
         <span style={{ color, fontFamily: "'JetBrains Mono', monospace" }}>
           max {Math.max(...data.map(d => d[dataKey]))}%
         </span>
@@ -361,7 +390,7 @@ function ServerTrend({ server, snapshots }) {
 }
 
 /* ── Sections structurées ITCare : volumes, snapshots, patch, backup ── */
-function ServerStructuredSections({ server }) {
+export function ServerStructuredSections({ server }) {
   const extraMap = Object.fromEntries((server.extra || []).map(e => [e.label, e.value]));
 
   /* Parse JSON sécurisé */
@@ -374,6 +403,8 @@ function ServerStructuredSections({ server }) {
   const patchTag     = extraMap["Patch Tag"];
   const patchGroup   = extraMap["Groupe Patch"];
   const patchExcluded = extraMap["Patch Exclu"];
+  const itcareId     = extraMap["ITCare ID"];
+  const itcarePath   = extraMap["ITCare Path"];
   const backupLast      = extraMap["Dernière Sauvegarde"];
   const backupSize      = extraMap["Stockage Sauvegarde"];
   const backupRetention = extraMap["Rétention Sauvegarde"];
@@ -386,13 +417,89 @@ function ServerStructuredSections({ server }) {
   const hasVolumes = volumes?.length > 0;
   const hasSnaps   = snapshots?.length > 0;
 
+  /* ── Fetch prochaine patch party via /changes?maintenanceTypes=PATCH_PARTY ── */
+  const [nextPatch, setNextPatch] = useState(null);
+  const [nextPatchLoading, setNextPatchLoading] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      let config = null;
+      try { config = JSON.parse(localStorage.getItem("capacity-itcare-config")); } catch {}
+      if (!config) return;
+      let body;
+      if (config.authMode === "credentials" && config.clientId && config.clientSecret) {
+        body = { clientId: config.clientId, clientSecret: config.clientSecret };
+      } else if (config.authMode === "token" && config.token) {
+        body = { token: config.token };
+      } else return;
+      setNextPatchLoading(true);
+      try {
+        const res = await fetch("/api/itcare-patchparty", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+        const json = await res.json();
+        if (cancelled) return;
+        if (json.error && (!json.changes || json.changes.length === 0)) {
+          console.error("[PatchParty] Erreur API:", json.error);
+          return;
+        }
+        const changes = json.changes || [];
+        console.log("[PatchParty] Réponse /changes:", changes.length, "événements");
+        if (changes.length > 0) console.log("[PatchParty] Raw events:", JSON.stringify(changes).slice(0, 1000));
+        if (changes.length === 0) return;
+
+        /* Filtrer les patch parties à venir (date >= maintenant) et trier par date */
+        const nowMs = Date.now();
+        const upcoming = changes
+          .map(c => ({
+            date: c.startAt || c.startDate || c.start || c.date || c.plannedDate || null,
+            label: c.titleFr || c.title || c.label || c.name || c.summary || c.descriptionFr || c.description || null,
+            patchGroup: c.patchGroup || c.group || null,
+            environment: c.environment || c.env || null,
+            patchTag: c.patchTag || null,
+            raw: c,
+          }))
+          .filter(c => c.date)
+          .filter(c => { const t = new Date(c.date).getTime(); return !isNaN(t) && t >= nowMs; })
+          .sort((a, b) => new Date(a.date) - new Date(b.date));
+
+        console.log("[PatchParty] Événements à venir:", upcoming.length, upcoming.slice(0, 3));
+
+        /* Si le serveur a un groupe patch, essayer de matcher ; sinon prendre la 1ère */
+        const groupNum = (patchGroup || "").match(/\d+/)?.[0];
+        const matched = groupNum
+          ? upcoming.find(c => {
+              const cg = String(c.patchGroup || "");
+              return cg === groupNum || cg === patchGroup || cg.includes(groupNum);
+            })
+          : null;
+        const picked = matched || upcoming[0];
+        if (picked) {
+          console.log("[PatchParty] Sélection:", picked);
+          setNextPatch(picked);
+        }
+      } catch (e) {
+        console.error("[PatchParty] Fetch error:", e);
+      }
+      finally { if (!cancelled) setNextPatchLoading(false); }
+    })();
+    return () => { cancelled = true; };
+  }, [patchLast, patchGroup]);
+
   if (!hasPatch && !hasBackup && !hasVolumes && !hasSnaps) return null;
 
-  const sectionHdr = (icon, label, color) => (
-    <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 10, fontWeight: 700, color, textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: 8, marginTop: 18, paddingTop: 12, borderTop: "1px solid rgba(255,255,255,0.06)" }}>
-      {icon} {label}
-    </div>
-  );
+  let sectionIdx = 0;
+  const sectionHdr = (icon, label, color) => {
+    const isFirst = sectionIdx === 0;
+    sectionIdx++;
+    return (
+      <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 10, fontWeight: 700, color, textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: 8, marginTop: isFirst ? 0 : 18, paddingTop: isFirst ? 0 : 12, borderTop: isFirst ? "none" : "1px solid rgba(255,255,255,0.06)" }}>
+        {icon} {label}
+      </div>
+    );
+  };
 
   const fmtDate = (d) => {
     if (!d) return "—";
@@ -403,16 +510,21 @@ function ServerStructuredSections({ server }) {
   const fmtGb = (v) => v != null ? (v >= 1024 ? `${(v/1024).toFixed(1)} To` : `${v} Go`) : null;
 
   return (
-    <>
+    <div style={{
+      background: "rgba(255,255,255,0.025)", border: "1px solid rgba(255,255,255,0.06)",
+      borderRadius: 16, padding: "18px 20px", minWidth: 0, overflow: "hidden",
+    }}>
       {/* ── Patch Party ── */}
       {hasPatch && (
         <div>
           {sectionHdr(<Wrench size={11} />, "Patch Party", "#A78BFA")}
           <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
             {[
-              { label: "Dernière",  value: patchTag ? `${fmtDate(patchLast)} (${patchTag})` : fmtDate(patchLast), color: "#9CA3AF" },
-              { label: "Statut",    value: patchExcluded ? `Exclue${patchExcluded !== "Oui" ? " — " + patchExcluded : ""}` : (patchLast ? "✓ Patchée" : ""), color: patchExcluded ? "#FBBF24" : "#34D399" },
-              { label: "Groupe",    value: patchGroup, color: "#C4B5FD" },
+              ...(nextPatch ? [{ label: "Prochaine", value: fmtDate(nextPatch.date), color: "#A78BFA" }] : []),
+              ...(nextPatchLoading && !nextPatch ? [{ label: "Prochaine", value: "chargement…", color: "#4B5563" }] : []),
+              ...(patchLast ? [{ label: "Dernière",  value: patchTag ? `${fmtDate(patchLast)} (${patchTag})` : fmtDate(patchLast), color: "#9CA3AF" }] : []),
+              ...(patchLast ? [{ label: "Statut",    value: patchExcluded ? `Exclue${patchExcluded !== "Oui" ? " — " + patchExcluded : ""}` : "✓ Patchée", color: patchExcluded ? "#FBBF24" : "#34D399" }] : []),
+              ...(patchGroup ? [{ label: "Groupe",    value: patchGroup, color: "#C4B5FD" }] : []),
             ].filter(r => r.value && r.value !== "—").map(({ label, value, color }) => (
               <div key={label} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", background: "rgba(167,139,250,0.06)", border: "1px solid rgba(167,139,250,0.15)", borderRadius: 8, padding: "6px 10px" }}>
                 <span style={{ fontSize: 10, color: "#6B7280", fontWeight: 600 }}>{label}</span>
@@ -503,13 +615,14 @@ function ServerStructuredSections({ server }) {
           </div>
         </div>
       )}
-    </>
+    </div>
   );
 }
 
 /* ── Panneau de détail ── */
 export function ServerDetail({ server, snapshots, onClose, width = 360, overrideStyle = {} }) {
-  const [extraOpen, setExtraOpen] = useState(false);
+  const [extraOpen, setExtraOpen] = useState(true);
+  const live = !!server.lastVpsCheck;
   const specs = [
     { Icon: MonitorCog,  label: "OS",      value: server.os },
     { Icon: Network,     label: "IP",      value: server.ip },
@@ -539,11 +652,17 @@ export function ServerDetail({ server, snapshots, onClose, width = 360, override
           <X size={16} />
         </button>
       </div>
-      <div style={{ marginBottom: 14, display: "flex", gap: 6, flexWrap: "wrap" }}>
+      <div style={{ marginBottom: 14, display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
         {server.env && <EnvBadge env={server.env} />}
         {server.app && <AppBadge app={server.app} />}
         {server.statut && <StatutBadge statut={server.statut} />}
         <RoleBadge role={server.role} />
+        {live && (
+          <span style={{ fontSize: 9, color: "#34D399", display: "flex", alignItems: "center", gap: 4, fontWeight: 700 }}>
+            <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#34D399", boxShadow: "0 0 6px #34D399", animation: "pulse 2s ease-in-out infinite" }} />
+            LIVE
+          </span>
+        )}
       </div>
 
       {/* Specs */}
@@ -563,6 +682,13 @@ export function ServerDetail({ server, snapshots, onClose, width = 360, override
             </div>
           </div>
         ))}
+      </div>
+
+      {/* Jauges temps réel */}
+      <div style={{ display: "flex", justifyContent: "space-around", marginBottom: 14 }}>
+        <ServerGauge value={server.cpu}  label="CPU" />
+        <ServerGauge value={server.ram}  label="RAM" />
+        <ServerGauge value={server.disk} label="Disque" />
       </div>
 
       {/* Courbes 24h */}
@@ -617,6 +743,14 @@ const ENV_FILTERS = [
   { id: "production", label: "Production", test: (env) => /prod/i.test(env) && !/pr[ée]?.?prod/i.test(env) },
   { id: "qa",         label: "QA",         test: (env) => /qa|qualif|test|dev/i.test(env) },
   { id: "recette",    label: "Recette",    test: (env) => /recette|uat|pr[ée]?.?prod|staging/i.test(env) },
+];
+
+/* Filtres rapides : statut + OS */
+const QUICK_FILTERS = [
+  { id: "running", label: "Running", test: (s) => /running|actif|encours|ok|up|operationnel|active/i.test(s.statut || "") },
+  { id: "stopped", label: "Stopped", test: (s) => /stop|arret|inactif|down|off|eteint|stopped/i.test(s.statut || "") },
+  { id: "windows", label: "Windows", test: (s) => detectOsType(s.os) === "windows" },
+  { id: "linux",   label: "Linux",   test: (s) => detectOsType(s.os) === "linux" },
 ];
 
 /* ── Sélecteur multi-applications ── */
@@ -746,7 +880,7 @@ function AppFilterDropdown({ servers, selectedApps, onChange }) {
 }
 
 /* ── Vue principale ── */
-export default function ServersView({ servers: propServers }) {
+export default function ServersView({ servers: propServers, onSelectServer }) {
   const storeServers = useSyncExternalStore(subscribeServers, getServers);
   const servers     = propServers || storeServers;
   const allServersForFilter = storeServers; /* liste complète pour le dropdown */
@@ -754,14 +888,23 @@ export default function ServersView({ servers: propServers }) {
   const [filterText, setFilterText] = useState("");
   const [filterEnv, setFilterEnv]   = useState("all");
   const [filterApp, setFilterApp]   = useState(null);
+  const [quickFilter, setQuickFilter] = useState(null);
   const selectedApps = useSyncExternalStore(subscribeAppFilter, getAppFilter);
   const [selectedId, setSelectedId] = useState(null);
   const [deleteConfirm, setDeleteConfirm] = useState(null);
+  const [flashMsg, setFlashMsg] = useState(null);
+
+  const flashDelete = (name) => {
+    setFlashMsg({ text: `Serveur « ${name} » supprimé`, ok: true });
+    setTimeout(() => setFlashMsg(null), 4000);
+  };
 
   const envFilter = ENV_FILTERS.find(f => f.id === filterEnv);
+  const quickF = QUICK_FILTERS.find(f => f.id === quickFilter);
   const filtered = servers.filter(s => {
     if (envFilter?.test && !(s.env && envFilter.test(s.env))) return false;
     if (filterApp && s.app !== filterApp) return false;
+    if (quickF && !quickF.test(s)) return false;
     if (filterText) {
       const q = filterText.toLowerCase();
       if (!s.name.toLowerCase().includes(q) && !(s.app || "").toLowerCase().includes(q) && !(s.statut || "").toLowerCase().includes(q) && !(s.ip || "").toLowerCase().includes(q)) return false;
@@ -771,8 +914,28 @@ export default function ServersView({ servers: propServers }) {
 
   const selected = servers.find(s => s.id === selectedId);
 
+  const handleCardClick = (server) => {
+    if (onSelectServer) {
+      onSelectServer(server);
+    } else {
+      setSelectedId(prev => prev === server.id ? null : server.id);
+    }
+  };
+
   return (
     <div>
+      {/* Flash message de suppression */}
+      {flashMsg && (
+        <div style={{
+          position: "fixed", top: 20, left: "50%", transform: "translateX(-50%)", zIndex: 2000,
+          display: "flex", alignItems: "center", gap: 8, padding: "10px 18px", borderRadius: 10,
+          background: "rgba(52,211,153,0.12)", border: "1px solid rgba(52,211,153,0.3)",
+          color: "#34D399", fontSize: 12, fontWeight: 600, backdropFilter: "blur(8px)",
+          boxShadow: "0 4px 20px rgba(0,0,0,0.3)", animation: "fadeIn 0.2s ease",
+        }}>
+          <Check size={14} /> {flashMsg.text}
+        </div>
+      )}
       <div>
         {/* Filtres */}
         <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap", alignItems: "center" }}>
@@ -800,6 +963,21 @@ export default function ServersView({ servers: propServers }) {
               color: filterEnv === id ? "#A5B4FC" : "#6B7280", transition: "all 0.15s",
             }}>{label}</button>
           ))}
+          {/* Séparateur */}
+          <div style={{ width: 1, height: 22, background: "rgba(255,255,255,0.08)", flexShrink: 0 }} />
+          {QUICK_FILTERS.map(({ id, label }) => {
+            const isActive = quickFilter === id;
+            const color = id === "running" ? "#34D399" : id === "stopped" ? "#F87171" : id === "windows" ? "#60A5FA" : "#FBBF24";
+            return (
+              <button key={id} onClick={() => setQuickFilter(prev => prev === id ? null : id)} style={{
+                padding: "6px 12px", borderRadius: 20, fontSize: 11, cursor: "pointer",
+                fontWeight: isActive ? 700 : 400, whiteSpace: "nowrap",
+                border: `1px solid ${isActive ? `${color}40` : "rgba(255,255,255,0.07)"}`,
+                background: isActive ? `${color}18` : "rgba(255,255,255,0.03)",
+                color: isActive ? color : "#6B7280", transition: "all 0.15s",
+              }}>{label}</button>
+            );
+          })}
           {filterApp && (
             <button onClick={() => setFilterApp(null)} style={{
               display: "inline-flex", alignItems: "center", gap: 4, padding: "5px 10px", borderRadius: 20,
@@ -823,7 +1001,7 @@ export default function ServersView({ servers: propServers }) {
             const isDelConfirm = deleteConfirm === s.id;
             return (
               <div key={s.id}
-                onClick={() => { if (!isDelConfirm) setSelectedId(isSel ? null : s.id); }}
+                onClick={() => { if (!isDelConfirm) handleCardClick(s); }}
                 style={{
                   position: "relative",
                   background: isSel ? "rgba(99,102,241,0.08)" : "rgba(255,255,255,0.025)",
@@ -839,7 +1017,7 @@ export default function ServersView({ servers: propServers }) {
                 {isDelConfirm ? (
                   <div onClick={e => e.stopPropagation()} style={{ position: "absolute", top: 8, right: 8, display: "flex", alignItems: "center", gap: 4, background: "rgba(15,18,27,0.95)", border: "1px solid rgba(248,113,113,0.4)", borderRadius: 8, padding: "4px 6px", zIndex: 5 }}>
                     <span style={{ fontSize: 10, color: "#F87171", fontWeight: 600, whiteSpace: "nowrap" }}>Supprimer ?</span>
-                    <button onClick={() => { removeServer(s.id); setDeleteConfirm(null); setSelectedId(null); }}
+                    <button onClick={() => { removeServer(s.id); setDeleteConfirm(null); setSelectedId(null); flashDelete(s.name); }}
                       style={{ fontSize: 10, padding: "2px 8px", borderRadius: 5, background: "rgba(248,113,113,0.2)", border: "1px solid rgba(248,113,113,0.4)", color: "#F87171", cursor: "pointer", fontWeight: 700 }}>Oui</button>
                     <button onClick={() => setDeleteConfirm(null)}
                       style={{ fontSize: 10, padding: "2px 8px", borderRadius: 5, background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)", color: "#9CA3AF", cursor: "pointer" }}>Non</button>
@@ -882,13 +1060,14 @@ export default function ServersView({ servers: propServers }) {
                 <DeltaBadge delta={lastDelta(s.name, snapshots)} />
 
                 {/* Pied */}
-                <div style={{ marginTop: 12, paddingTop: 10, borderTop: "1px solid rgba(255,255,255,0.05)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                <div style={{ marginTop: 12, paddingTop: 10, borderTop: "1px solid rgba(255,255,255,0.05)", display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 4 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
                     {s.statut && <StatutBadge statut={s.statut} />}
+                    <OsBadge os={s.os} />
                     <span style={{ fontSize: 10, color: "#4B5563", fontFamily: "'JetBrains Mono', monospace" }}>{s.ip}</span>
                   </div>
                   <span style={{ fontSize: 10, color: "#4B5563", fontFamily: "'JetBrains Mono', monospace" }}>
-                    {s.cores != null ? `${s.cores} vCPU · ${s.ramGb} Go` : s.os && s.os !== "—" ? s.os : ""}
+                    {s.cores != null ? `${s.cores} vCPU · ${s.ramGb} Go` : ""}
                   </span>
                 </div>
               </div>

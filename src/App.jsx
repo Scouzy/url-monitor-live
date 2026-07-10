@@ -11,6 +11,7 @@ import Toast from "./components/Toast";
 import ExcelImport from "./components/ExcelImport";
 import IncidentLog, { loadLog, addIncident, IncidentLogPage } from "./components/IncidentLog";
 import ServersView from "./components/ServersView";
+import ServerDetailPage from "./components/ServerDetailPage";
 import CapacityPlanning from "./components/CapacityPlanning";
 import ServerImport, { itcareToRow, API_LS_KEY as ITCARE_LS_KEY } from "./components/ServerImport";
 import TodoList from "./components/TodoList";
@@ -52,6 +53,7 @@ export default function App() {
   const [mainTab, setMainTab] = useState(() => localStorage.getItem("g1oeil_tab") || "surveillance");
   const [activeModule, setActiveModule] = useState(() => localStorage.getItem("g1oeil_module") || "dashboard");
   const [serverSubTab, setServerSubTab] = useState("inventory");
+  const [selectedServerId, setSelectedServerId] = useState(null);
   const [interventionSubTab, setInterventionSubTab] = useState("tickets");
   const [itcareTickets, setItcareTickets] = useState([]);
   const [itcareLoading, setItcareLoading] = useState(false);
@@ -110,6 +112,18 @@ export default function App() {
   useEffect(() => {
     const config = localStorage.getItem("capacity-itcare-config");
     if (config) refreshItcareTickets();
+  }, [refreshItcareTickets]);
+
+  /* ── Auto-refresh ITCare tickets (toutes les 5 min, mode credentials uniquement) ── */
+  useEffect(() => {
+    const TICKETS_INTERVAL_MS = 5 * 60 * 1000;
+    const id = setInterval(() => {
+      let config = null;
+      try { config = JSON.parse(localStorage.getItem("capacity-itcare-config")); } catch {}
+      if (!config || config.authMode !== "credentials" || !config.clientId || !config.clientSecret) return;
+      refreshItcareTickets();
+    }, TICKETS_INTERVAL_MS);
+    return () => clearInterval(id);
   }, [refreshItcareTickets]);
 
   /* ── Détection mobile / resize ── */
@@ -599,7 +613,7 @@ export default function App() {
               <div style={{ minWidth: 0 }}>
               <h1 style={{ fontSize: isMobile ? 14 : 16, fontWeight: 700, color: "#F9FAFB", margin: 0 }}>
                 {activeModule === "servers"
-                  ? ({ inventory: "Inventaire serveurs", agents: "Agents VPS", config: "Configuration agents", deploy: "Déploiement en masse" }[serverSubTab] || "Serveurs")
+                  ? ({ inventory: "Inventaire serveurs", detail: selectedServerId ? `Détail · ${(filteredServers.find(s => s.id === selectedServerId) || allServers.find(s => s.id === selectedServerId))?.name || ""}` : "Détail serveur", agents: "Agents VPS", config: "Configuration agents", deploy: "Déploiement en masse" }[serverSubTab] || "Serveurs")
                   : ({ dashboard: "Dashboard", capacity: "Capacity Planning", todo: "TodoList", intervention: "Interventions", workflows: "Workflows", impacts: "Impacts Applicatifs", journal: "Journal des alertes", parametres: "Paramètres" }[activeModule] || activeModule)}
               </h1>
               {!isMobile && (
@@ -641,6 +655,7 @@ export default function App() {
             <div style={{ display: "flex", gap: 4, padding: isMobile ? "0 12px" : "0 24px", borderBottom: "1px solid rgba(255,255,255,0.06)", background: "rgba(255,255,255,0.01)", overflowX: "auto", WebkitOverflowScrolling: "touch" }}>
               {[
                 { id: "inventory", label: "Inventaire" },
+                { id: "detail",    label: selectedServerId ? (isMobile ? "Détail" : `Détail · ${(filteredServers.find(s => s.id === selectedServerId) || allServers.find(s => s.id === selectedServerId))?.name || ""}`) : "Détail" },
                 { id: "agents",    label: `Agents VPS${agentsBadge > 0 ? ` (${agentsBadge} ✗)` : ""}` },
                 { id: "config",    label: isMobile ? "Config" : "Configuration agents" },
                 { id: "deploy",    label: "Déploiement" },
@@ -673,7 +688,8 @@ export default function App() {
           )}
           <main style={{ flex: 1, padding: activeModule === "workflows" || activeModule === "impacts" ? 0 : "20px 24px 48px", overflowY: activeModule === "workflows" || activeModule === "impacts" ? "hidden" : "auto", display: "flex", flexDirection: "column" }}>
             {activeModule === "dashboard" && <DashboardPage groups={groups} allUrls={allUrls} allServers={filteredServers} incidentLog={incidentLog} capacitySettings={capacitySettings} />}
-            {activeModule === "servers"   && serverSubTab === "inventory" && <ServersView servers={filteredServers} />}
+            {activeModule === "servers"   && serverSubTab === "inventory" && <ServersView servers={filteredServers} onSelectServer={(s) => { setSelectedServerId(s.id); setServerSubTab("detail"); }} />}
+            {activeModule === "servers"   && serverSubTab === "detail"    && <ServerDetailPage server={filteredServers.find(s => s.id === selectedServerId) || allServers.find(s => s.id === selectedServerId) || filteredServers[0]} isMobile={isMobile} onBack={() => setServerSubTab("inventory")} />}
             {activeModule === "servers"   && serverSubTab === "agents"    && <AgentsView />}
             {activeModule === "servers"   && serverSubTab === "config"    && <VpsAgentsConfig />}
             {activeModule === "servers"   && serverSubTab === "deploy"    && <AgentDeployMass servers={filteredServers} />}

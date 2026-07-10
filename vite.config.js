@@ -121,8 +121,8 @@ function screenshotPlugin() {
     if (!exe) throw new Error('Chrome/Edge introuvable. Définissez CHROME_PATH.');
     launching = puppeteer.launch({
       executablePath: exe,
-      headless: true,
-      args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--window-size=1280,800'],
+      headless: 'new',
+      args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu', '--window-size=1280,800', '--window-position=-32000,-32000'],
     }).then(b => {
       browser = b; launching = null;
       b.on('disconnected', () => { browser = null; launching = null; });
@@ -468,7 +468,14 @@ function itcarePlugin() {
             headers: { 'Authorization': `Bearer ${token}` },
             signal: AbortSignal.timeout(8000),
           });
-          if (res.ok) result[i + bi] = { ...r, ...(await res.json()) };
+          if (res.ok) {
+            const detail = await res.json();
+            result[i + bi] = { ...r, ...detail };
+            /* Log patchParty pour découvrir les champs disponibles */
+            if (detail.patchParty) {
+              console.log('\x1b[36m[ITCare]\x1b[0m patchParty brut:', JSON.stringify(detail.patchParty));
+            }
+          }
         } catch {}
       }));
     }
@@ -966,6 +973,151 @@ function itcarePlugin() {
             _tokenCache = null;
             res.statusCode = 500;
             res.end(JSON.stringify({ error: e.message }));
+          }
+        });
+      });
+
+      /* ── /api/itcare-snapshots : snapshots d'un serveur spécifique ── */
+      server.middlewares.use('/api/itcare-snapshots', (req, res) => {
+        res.setHeader('Content-Type', 'application/json');
+        res.setHeader('Access-Control-Allow-Origin', '*');
+        res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+        if (req.method === 'OPTIONS') { res.statusCode = 204; return res.end(); }
+        if (req.method !== 'POST')    { res.statusCode = 405; return res.end(JSON.stringify({ error: 'POST requis' })); }
+
+        let body = '';
+        req.on('data', d => { body += d; });
+        req.on('end', async () => {
+          try {
+            const payload = JSON.parse(body || '{}');
+            const parsed = parseAuthToken(payload);
+            if (!parsed) return res.end(JSON.stringify({ error: 'Auth manquante' }));
+            const { instanceId, path: instancePath } = payload;
+            if (!instanceId) return res.end(JSON.stringify({ error: 'instanceId manquant' }));
+            const token = parsed.mode === 'token' ? parsed.value : await getToken(parsed.clientId, parsed.clientSecret);
+            const path = instancePath || '/compute/instances';
+            const r = await fetch(`${API_BASE}${path}/${instanceId}/snapshots`, {
+              headers: { 'Authorization': `Bearer ${token}` },
+              signal: AbortSignal.timeout(10000),
+            });
+            if (!r.ok) {
+              return res.end(JSON.stringify({ error: `API ITCare ${r.status}`, snapshots: [] }));
+            }
+            const text = await r.text();
+            if (!text) return res.end(JSON.stringify({ snapshots: [] }));
+            const data = JSON.parse(text);
+            const arr = Array.isArray(data) ? data : (data.content || []);
+            res.end(JSON.stringify({ snapshots: arr }));
+          } catch (e) {
+            _tokenCache = null;
+            res.statusCode = 500;
+            res.end(JSON.stringify({ error: e.message, snapshots: [] }));
+          }
+        });
+      });
+
+      /* ── /api/itcare-patchparty : prochaines patch parties via /changes ── */
+      server.middlewares.use('/api/itcare-patchparty', (req, res) => {
+        res.setHeader('Content-Type', 'application/json');
+        res.setHeader('Access-Control-Allow-Origin', '*');
+        res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+        if (req.method === 'OPTIONS') { res.statusCode = 204; return res.end(); }
+        if (req.method !== 'POST')    { res.statusCode = 405; return res.end(JSON.stringify({ error: 'POST requis' })); }
+
+        let body = '';
+        req.on('data', d => { body += d; });
+        req.on('end', async () => {
+          try {
+            const payload = JSON.parse(body || '{}');
+            const parsed = parseAuthToken(payload);
+            if (!parsed) return res.end(JSON.stringify({ error: 'Auth manquante' }));
+            const token = parsed.mode === 'token' ? parsed.value : await getToken(parsed.clientId, parsed.clientSecret);
+
+            /* GET /changes?maintenanceTypes=PATCH_PARTY sur 1 an */
+            const now = new Date();
+            const start = now.toISOString();
+            const end = new Date(now.getTime() + 365 * 86400000).toISOString();
+            const envs = payload.environments || ['PROD', 'ALL'];
+            const envParams = envs.map(e => `environments=${encodeURIComponent(e)}`).join('&');
+            const url = `${API_BASE}/changes?maintenanceTypes=PATCH_PARTY&start=${start}&end=${end}&${envParams}`;
+            console.log('\x1b[36m[ITCare]\x1b[0m PatchParty: GET', url.slice(0, 120) + '…');
+
+            const r = await fetch(url, {
+              headers: { 'Authorization': `Bearer ${token}`, 'Accept': 'application/vnd.cegedim-it.v1+json' },
+              signal: AbortSignal.timeout(10000),
+            });
+            if (!r.ok) {
+              const txt = await r.text().catch(() => '');
+              console.log('\x1b[36m[ITCare]\x1b[0m PatchParty: erreur', r.status, txt.slice(0, 200));
+              return res.end(JSON.stringify({ error: `API ITCare ${r.status} ${txt.slice(0, 200)}`, changes: [] }));
+            }
+            const text = await r.text();
+            if (!text) {
+              console.log('\x1b[36m[ITCare]\x1b[0m PatchParty: réponse vide');
+              return res.end(JSON.stringify({ changes: [] }));
+            }
+            const data = JSON.parse(text);
+            const arr = Array.isArray(data) ? data : (data.content || data.changes || []);
+            console.log('\x1b[36m[ITCare]\x1b[0m PatchParty:', arr.length, 'événements récupérés');
+            if (arr.length > 0) console.log('\x1b[36m[ITCare]\x1b[0m PatchParty sample:', JSON.stringify(arr[0]).slice(0, 300));
+            res.end(JSON.stringify({ changes: arr }));
+          } catch (e) {
+            _tokenCache = null;
+            res.statusCode = 500;
+            res.end(JSON.stringify({ error: e.message, changes: [] }));
+          }
+        });
+      });
+
+      /* ── /api/itcare-actions : historique des actions récentes d'un serveur ── */
+      server.middlewares.use('/api/itcare-actions', (req, res) => {
+        res.setHeader('Content-Type', 'application/json');
+        res.setHeader('Access-Control-Allow-Origin', '*');
+        res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+        if (req.method === 'OPTIONS') { res.statusCode = 204; return res.end(); }
+        if (req.method !== 'POST')    { res.statusCode = 405; return res.end(JSON.stringify({ error: 'POST requis' })); }
+
+        let body = '';
+        req.on('data', d => { body += d; });
+        req.on('end', async () => {
+          try {
+            const payload = JSON.parse(body || '{}');
+            const parsed = parseAuthToken(payload);
+            if (!parsed) return res.end(JSON.stringify({ error: 'Auth manquante' }));
+            const { instanceId, path: instancePath } = payload;
+            if (!instanceId) return res.end(JSON.stringify({ error: 'instanceId manquant' }));
+            const token = parsed.mode === 'token' ? parsed.value : await getToken(parsed.clientId, parsed.clientSecret);
+
+            /* GET /compute/resources/{id}/history — toujours /compute/resources quel que soit le path stocké */
+            const url = `${API_BASE}/compute/resources/${instanceId}/history`;
+            console.log('\x1b[36m[ITCare]\x1b[0m History: GET', url.slice(0, 120));
+
+            const r = await fetch(url, {
+              headers: {
+                'Authorization': `Bearer ${token}`,
+                'Accept': 'application/json, text/plain, */*',
+              },
+              signal: AbortSignal.timeout(10000),
+            });
+            if (!r.ok) {
+              const txt = await r.text().catch(() => '');
+              console.log('\x1b[36m[ITCare]\x1b[0m History: erreur', r.status, txt.slice(0, 200));
+              return res.end(JSON.stringify({ error: `API ITCare ${r.status}`, actions: [] }));
+            }
+            const text = await r.text();
+            if (!text) return res.end(JSON.stringify({ actions: [] }));
+            const data = JSON.parse(text);
+            const arr = Array.isArray(data) ? data : (data.content || data.actions || data.history || []);
+            console.log('\x1b[36m[ITCare]\x1b[0m History:', arr.length, 'événements récupérés');
+            if (arr.length > 0) {
+              console.log('\x1b[36m[ITCare]\x1b[0m History sample:', JSON.stringify(arr[0]).slice(0, 500));
+              console.log('\x1b[36m[ITCare]\x1b[0m History all descriptions:', arr.map(a => JSON.stringify(a).slice(0, 200)).join('\n'));
+            }
+            res.end(JSON.stringify({ actions: arr }));
+          } catch (e) {
+            _tokenCache = null;
+            res.statusCode = 500;
+            res.end(JSON.stringify({ error: e.message, actions: [] }));
           }
         });
       });

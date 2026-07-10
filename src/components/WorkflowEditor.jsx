@@ -1,8 +1,9 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import {
   Plus, Trash2, ChevronUp, ChevronDown, GitBranch, Play,
   CheckCircle, Clock, Bell, Shield, Terminal, GitFork, Rocket,
   Calendar, User, Package, Layers, ChevronRight, AlertTriangle,
+  PanelLeftClose, PanelLeftOpen,
 } from "lucide-react";
 import { loadWorkflows, saveWorkflows, makeWorkflow, makeStep } from "../utils/workflowStorage";
 
@@ -165,11 +166,300 @@ function StepRow({ step, idx, total, onToggle, onUpdate, onMove, onDelete, expan
   );
 }
 
+/* ── Vue Schéma fonctionnel : flux horizontal gauche → droite (vertical sur mobile) ── */
+function FunctionalSchema({ sel, updStep, delStep, addStep }) {
+  const [editingId, setEditingId] = useState(null);
+  const [isMobile, setIsMobile] = useState(() => window.innerWidth < 768);
+  useEffect(() => {
+    const onResize = () => setIsMobile(window.innerWidth < 768);
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
+
+  const hArrow = (color = "rgba(255,255,255,0.15)") => (
+    <div style={{ display: "flex", alignItems: "center", flexShrink: 0, minWidth: isMobile ? 0 : 40, justifyContent: "center", padding: isMobile ? "4px 0" : 0 }}>
+      {isMobile ? (
+        <div style={{ width: 0, height: 0, borderLeft: "6px solid transparent", borderRight: "6px solid transparent", borderTop: `8px solid ${color}` }} />
+      ) : (
+        <>
+          <div style={{ width: 28, height: 2, background: color, borderRadius: 1 }} />
+          <div style={{ width: 0, height: 0, borderTop: "6px solid transparent", borderBottom: "6px solid transparent", borderLeft: `8px solid ${color}` }} />
+        </>
+      )}
+    </div>
+  );
+
+  return (
+    <div style={{ flex: 1, overflow: "auto", padding: "24px 28px 48px" }}>
+      {/* Titre + bouton ajouter */}
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <GitBranch size={15} color="#818CF8" />
+          <span style={{ fontSize: 14, fontWeight: 700, color: "#E5E7EB" }}>{sel.name}</span>
+          <span style={{ fontSize: 11, color: "#4B5563" }}>{sel.steps.length} étapes</span>
+        </div>
+        <button onClick={() => addStep()} style={{ display: "flex", alignItems: "center", gap: 5, padding: "6px 14px", borderRadius: 8, background: "rgba(99,102,241,0.12)", border: "1px solid rgba(99,102,241,0.3)", color: "#818CF8", fontSize: 11, fontWeight: 600, cursor: "pointer" }}>
+          <Plus size={12} /> Ajouter une étape
+        </button>
+      </div>
+
+      {sel.steps.length === 0 ? (
+        <div style={{ textAlign: "center", padding: "48px 0", color: "#374151", fontSize: 12, borderRadius: 10, border: "1px dashed rgba(255,255,255,0.06)" }}>
+          Aucune étape — cliquez "Ajouter une étape" pour commencer
+        </div>
+      ) : (
+        <div style={{ display: "flex", flexDirection: isMobile ? "column" : "row", alignItems: isMobile ? "stretch" : "stretch", gap: 0, minWidth: isMobile ? "auto" : "max-content", paddingBottom: 16, maxWidth: isMobile ? 480 : "none", margin: isMobile ? "0 auto" : 0 }}>
+          {sel.steps.map((step, idx) => {
+            const tc = STEP_TYPES[step.type] || STEP_TYPES.action;
+            const sc = STEP_STATUS[step.status] || STEP_STATUS.pending;
+            const isDone = step.status === "done";
+            const isEditing = editingId === step.id;
+            const isLast = idx === sel.steps.length - 1;
+
+            return (
+              <div key={step.id} style={{ display: "flex", flexDirection: isMobile ? "column" : "row", alignItems: "stretch" }}>
+                {/* Rectangle étape */}
+                <div style={{
+                  width: isMobile ? "100%" : 220, minWidth: isMobile ? 0 : 220,
+                  background: isDone ? `${tc.color}10` : "#0F1520",
+                  border: `1.5px solid ${isDone ? tc.color : isEditing ? `${tc.color}60` : "rgba(255,255,255,0.09)"}`,
+                  borderRadius: 12, padding: "12px 14px",
+                  display: "flex", flexDirection: "column", gap: 8,
+                  boxShadow: isEditing ? `0 0 0 2px ${tc.color}22` : "none",
+                  transition: "border 0.15s, box-shadow 0.15s",
+                }}>
+                  {/* Numéro + type + statut */}
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 6 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
+                      <span style={{ fontSize: 10, fontWeight: 800, color: "#374151", fontFamily: "monospace" }}>{idx + 1}</span>
+                      <span style={{ fontSize: 9, padding: "1px 6px", borderRadius: 4, background: `${tc.color}22`, color: tc.color, fontWeight: 700 }}>{tc.label}</span>
+                    </div>
+                    <span
+                      title="Cliquer pour changer le statut"
+                      onClick={() => { const keys = Object.keys(STEP_STATUS); updStep(step.id, { status: keys[(keys.indexOf(step.status) + 1) % keys.length] }); }}
+                      style={{ fontSize: 9, padding: "1px 6px", borderRadius: 4, background: `${sc.color}20`, color: sc.color, fontWeight: 600, cursor: "pointer", flexShrink: 0 }}>
+                      {sc.label}
+                    </span>
+                  </div>
+
+                  {/* Contenu */}
+                  {isEditing ? (
+                    <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+                      <input value={step.title} onChange={e => updStep(step.id, { title: e.target.value })}
+                        placeholder="Titre…" style={{ ...inp({ padding: "5px 8px", fontSize: 11, fontWeight: 600 }) }} />
+                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 5 }}>
+                        <input value={step.responsible} onChange={e => updStep(step.id, { responsible: e.target.value })}
+                          placeholder="Responsable…" style={{ ...inp({ padding: "4px 7px", fontSize: 10 }) }} />
+                        <input value={step.duration} onChange={e => updStep(step.id, { duration: e.target.value })}
+                          placeholder="Durée…" style={{ ...inp({ padding: "4px 7px", fontSize: 10 }) }} />
+                      </div>
+                      <select value={step.type} onChange={e => updStep(step.id, { type: e.target.value })}
+                        style={{ ...inp({ padding: "4px 7px", fontSize: 10 }) }}>
+                        {Object.entries(STEP_TYPES).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
+                      </select>
+                      <textarea value={step.description || ""} onChange={e => updStep(step.id, { description: e.target.value })}
+                        rows={2} placeholder="Instructions…" style={{ ...inp({ padding: "4px 7px", fontSize: 10, resize: "vertical" }) }} />
+                    </div>
+                  ) : (
+                    <div onClick={() => setEditingId(isEditing ? null : step.id)} style={{ cursor: "pointer", flex: 1, display: "flex", flexDirection: "column", gap: 4 }}>
+                      <div style={{ fontSize: 11, fontWeight: 600, color: "#E5E7EB", lineHeight: 1.35, textDecoration: isDone ? "line-through" : "none", opacity: isDone ? 0.65 : 1 }}>
+                        {step.title}
+                      </div>
+                      {(step.responsible || step.duration) && (
+                        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                          {step.responsible && <span style={{ fontSize: 9, color: "#4B5563" }}>👤 {step.responsible}</span>}
+                          {step.duration && <span style={{ fontSize: 9, color: "#374151" }}>⏱ {step.duration}</span>}
+                        </div>
+                      )}
+                      {step.description && (
+                        <div style={{ fontSize: 9, color: "#374151", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{step.description}</div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Actions bas */}
+                  <div style={{ display: "flex", justifyContent: "flex-end", gap: 4, marginTop: "auto" }}>
+                    <button onClick={() => setEditingId(isEditing ? null : step.id)}
+                      style={{ background: "none", border: "none", color: isEditing ? tc.color : "#374151", cursor: "pointer", padding: "1px 4px", fontSize: 11 }}>
+                      {isEditing ? "✓" : "✎"}
+                    </button>
+                    <button onClick={() => { delStep(step.id); if (editingId === step.id) setEditingId(null); }}
+                      style={{ background: "none", border: "none", color: "#374151", cursor: "pointer", padding: 1, display: "flex" }}
+                      onMouseEnter={e => e.currentTarget.style.color = "#F87171"}
+                      onMouseLeave={e => e.currentTarget.style.color = "#374151"}>
+                      <Trash2 size={11} />
+                    </button>
+                  </div>
+                </div>
+
+                {/* Flèche entre étapes */}
+                {!isLast && hArrow(isDone ? `${tc.color}50` : "rgba(255,255,255,0.12)")}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ── Vue Schéma vertical : cartes empilées avec flèches vers le bas ── */
+function VerticalSchema({ sel, updStep, delStep, addStep }) {
+  const [editingId, setEditingId] = useState(null);
+
+  const vArrow = (color = "rgba(255,255,255,0.12)") => (
+    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", height: 28, justifyContent: "center" }}>
+      <div style={{ width: 1.5, flex: 1, background: color }} />
+      <div style={{ width: 0, height: 0, borderLeft: "5px solid transparent", borderRight: "5px solid transparent", borderTop: `7px solid ${color}` }} />
+    </div>
+  );
+
+  return (
+    <div style={{ flex: 1, overflow: "auto", padding: "24px 28px 48px" }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <GitBranch size={15} color="#818CF8" />
+          <span style={{ fontSize: 14, fontWeight: 700, color: "#E5E7EB" }}>{sel.name}</span>
+          <span style={{ fontSize: 11, color: "#4B5563" }}>{sel.steps.length} étapes</span>
+        </div>
+        <button onClick={() => addStep()} style={{ display: "flex", alignItems: "center", gap: 5, padding: "6px 14px", borderRadius: 8, background: "rgba(99,102,241,0.12)", border: "1px solid rgba(99,102,241,0.3)", color: "#818CF8", fontSize: 11, fontWeight: 600, cursor: "pointer" }}>
+          <Plus size={12} /> Ajouter une étape
+        </button>
+      </div>
+
+      {sel.steps.length === 0 ? (
+        <div style={{ textAlign: "center", padding: "48px 0", color: "#374151", fontSize: 12, borderRadius: 10, border: "1px dashed rgba(255,255,255,0.06)" }}>
+          Aucune étape — cliquez "Ajouter une étape" pour commencer
+        </div>
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", alignItems: "stretch", maxWidth: 480, margin: "0 auto" }}>
+          {sel.steps.map((step, idx) => {
+            const tc = STEP_TYPES[step.type] || STEP_TYPES.action;
+            const sc = STEP_STATUS[step.status] || STEP_STATUS.pending;
+            const isDone = step.status === "done";
+            const isEditing = editingId === step.id;
+            const isLast = idx === sel.steps.length - 1;
+
+            return (
+              <div key={step.id}>
+                <div style={{
+                  background: isDone ? `${tc.color}10` : "#0F1520",
+                  border: `1.5px solid ${isDone ? tc.color : isEditing ? `${tc.color}60` : "rgba(255,255,255,0.09)"}`,
+                  borderRadius: 12, padding: "12px 16px",
+                  display: "flex", flexDirection: "column", gap: 8,
+                  boxShadow: isEditing ? `0 0 0 2px ${tc.color}22` : "none",
+                  transition: "border 0.15s, box-shadow 0.15s",
+                }}>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 6 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                      <span style={{ fontSize: 10, fontWeight: 800, color: "#374151", fontFamily: "monospace" }}>{idx + 1}</span>
+                      <tc.Icon size={12} color={tc.color} />
+                      <span style={{ fontSize: 9, padding: "1px 6px", borderRadius: 4, background: `${tc.color}22`, color: tc.color, fontWeight: 700 }}>{tc.label}</span>
+                    </div>
+                    <span
+                      title="Cliquer pour changer le statut"
+                      onClick={() => { const keys = Object.keys(STEP_STATUS); updStep(step.id, { status: keys[(keys.indexOf(step.status) + 1) % keys.length] }); }}
+                      style={{ fontSize: 9, padding: "1px 6px", borderRadius: 4, background: `${sc.color}20`, color: sc.color, fontWeight: 600, cursor: "pointer", flexShrink: 0 }}>
+                      {sc.label}
+                    </span>
+                  </div>
+
+                  {isEditing ? (
+                    <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+                      <input value={step.title} onChange={e => updStep(step.id, { title: e.target.value })}
+                        placeholder="Titre…" style={{ ...inp({ padding: "5px 8px", fontSize: 11, fontWeight: 600 }) }} />
+                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 5 }}>
+                        <input value={step.responsible} onChange={e => updStep(step.id, { responsible: e.target.value })}
+                          placeholder="Responsable…" style={{ ...inp({ padding: "4px 7px", fontSize: 10 }) }} />
+                        <input value={step.duration} onChange={e => updStep(step.id, { duration: e.target.value })}
+                          placeholder="Durée…" style={{ ...inp({ padding: "4px 7px", fontSize: 10 }) }} />
+                      </div>
+                      <select value={step.type} onChange={e => updStep(step.id, { type: e.target.value })}
+                        style={{ ...inp({ padding: "4px 7px", fontSize: 10 }) }}>
+                        {Object.entries(STEP_TYPES).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
+                      </select>
+                      <textarea value={step.description || ""} onChange={e => updStep(step.id, { description: e.target.value })}
+                        rows={2} placeholder="Instructions…" style={{ ...inp({ padding: "4px 7px", fontSize: 10, resize: "vertical" }) }} />
+                    </div>
+                  ) : (
+                    <div onClick={() => setEditingId(isEditing ? null : step.id)} style={{ cursor: "pointer", flex: 1 }}>
+                      <div style={{ fontSize: 12, fontWeight: 600, color: "#E5E7EB", lineHeight: 1.35, textDecoration: isDone ? "line-through" : "none", opacity: isDone ? 0.65 : 1 }}>
+                        {step.title}
+                      </div>
+                      {(step.responsible || step.duration) && (
+                        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 4 }}>
+                          {step.responsible && <span style={{ fontSize: 9, color: "#4B5563" }}>👤 {step.responsible}</span>}
+                          {step.duration && <span style={{ fontSize: 9, color: "#374151" }}>⏱ {step.duration}</span>}
+                        </div>
+                      )}
+                      {step.description && (
+                        <div style={{ fontSize: 9, color: "#374151", marginTop: 4, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{step.description}</div>
+                      )}
+                    </div>
+                  )}
+
+                  <div style={{ display: "flex", justifyContent: "flex-end", gap: 4, marginTop: "auto" }}>
+                    <button onClick={() => setEditingId(isEditing ? null : step.id)}
+                      style={{ background: "none", border: "none", color: isEditing ? tc.color : "#374151", cursor: "pointer", padding: "1px 4px", fontSize: 11 }}>
+                      {isEditing ? "✓" : "✎"}
+                    </button>
+                    <button onClick={() => { delStep(step.id); if (editingId === step.id) setEditingId(null); }}
+                      style={{ background: "none", border: "none", color: "#374151", cursor: "pointer", padding: 1, display: "flex" }}
+                      onMouseEnter={e => e.currentTarget.style.color = "#F87171"}
+                      onMouseLeave={e => e.currentTarget.style.color = "#374151"}>
+                      <Trash2 size={11} />
+                    </button>
+                  </div>
+                </div>
+
+                {!isLast && vArrow(isDone ? `${tc.color}50` : "rgba(255,255,255,0.12)")}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 /* ── Éditeur générique ── */
 function GenericEditor({ sel, upd, addStep, delStep, moveStep, updStep, toggleExp, expSteps }) {
+  const [view, setView] = useState("etapes"); /* "etapes" | "schema" | "schema-fn" */
   const done = sel.steps.filter(s => s.status === "done").length;
+
+  if (view === "schema" || view === "schema-fn") {
+    return (
+      <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
+        {/* Barre de navigation responsive */}
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 28px", borderBottom: "1px solid rgba(255,255,255,0.06)", flexShrink: 0, flexWrap: "wrap", gap: 8 }}>
+          <div style={{ display: "flex", gap: 4, background: "rgba(0,0,0,0.25)", borderRadius: 8, padding: 3, flexWrap: "wrap" }}>
+            {[["etapes", "📋 Étapes"], ["schema", "🔀 Schéma"], ["schema-fn", "📐 Schéma fn."]].map(([k, label]) => (
+              <button key={k} onClick={() => setView(k)} style={{ padding: "4px 12px", borderRadius: 6, border: "none", fontFamily: "inherit", fontSize: 11, fontWeight: view === k ? 700 : 400, cursor: "pointer", background: view === k ? "rgba(99,102,241,0.15)" : "transparent", color: view === k ? "#818CF8" : "#6B7280", transition: "all 0.15s", whiteSpace: "nowrap" }}>
+                {label}
+              </button>
+            ))}
+          </div>
+          <span style={{ fontSize: 10, color: "#374151" }}>{done}/{sel.steps.length} terminées</span>
+        </div>
+        {view === "schema"
+          ? <VerticalSchema sel={sel} updStep={updStep} delStep={delStep} addStep={addStep} />
+          : <FunctionalSchema sel={sel} updStep={updStep} delStep={delStep} addStep={addStep} />}
+      </div>
+    );
+  }
+
   return (
     <div style={{ flex: 1, overflowY: "auto", padding: "24px 32px 48px" }}>
+      {/* Barre de toggle vue */}
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 16, flexWrap: "wrap" }}>
+        <div style={{ display: "flex", gap: 4, background: "rgba(0,0,0,0.25)", borderRadius: 8, padding: 3, flexWrap: "wrap" }}>
+          {[["etapes", "📋 Étapes"], ["schema", "🔀 Schéma"], ["schema-fn", "📐 Schéma fn."]].map(([k, label]) => (
+            <button key={k} onClick={() => setView(k)} style={{ padding: "4px 12px", borderRadius: 6, border: "none", fontFamily: "inherit", fontSize: 11, fontWeight: view === k ? 700 : 400, cursor: "pointer", background: view === k ? "rgba(99,102,241,0.15)" : "transparent", color: view === k ? "#818CF8" : "#6B7280", transition: "all 0.15s", whiteSpace: "nowrap" }}>
+              {label}
+            </button>
+          ))}
+        </div>
+      </div>
       <input value={sel.name} onChange={e => upd({ name: e.target.value })}
         style={{ ...inp({ background: "transparent", border: "none", fontSize: 22, fontWeight: 700, color: "#F9FAFB", padding: "0 0 4px" }) }} />
       <div style={{ display: "flex", gap: 10, alignItems: "center", marginTop: 6, marginBottom: 20, flexWrap: "wrap" }}>
@@ -393,7 +683,7 @@ function MepSchema({ sel, updStep, delStep, addStep }) {
 
 /* ── Éditeur MeP ── */
 function MepEditor({ sel, upd, addStep, delStep, moveStep, updStep, toggleExp, expSteps }) {
-  const [mepView, setMepView] = useState("etapes"); // "etapes" | "schema"
+  const [mepView, setMepView] = useState("etapes"); // "etapes" | "schema" | "schema-fn"
   const crit = MEP_CRITICITE[sel.criticite] || MEP_CRITICITE.normal;
   const done = sel.steps.filter(s => s.status === "done").length;
   const pct  = sel.steps.length > 0 ? Math.round((done / sel.steps.length) * 100) : 0;
@@ -414,10 +704,10 @@ function MepEditor({ sel, upd, addStep, delStep, moveStep, updStep, toggleExp, e
             <span style={{ fontSize: 10, color: `${crit.color}88` }}>{crit.desc}</span>
           </div>
         </div>
-        {/* Onglets Étapes / Schéma */}
+        {/* Onglets Étapes / Schéma / Schéma fonctionnel */}
         <div style={{ display: "flex", gap: 4, background: "rgba(0,0,0,0.25)", borderRadius: 8, padding: 3 }}>
-          {[["etapes", "📋 Étapes"], ["schema", "🔀 Schéma"]].map(([k, label]) => (
-            <button key={k} onClick={() => setMepView(k)} style={{ padding: "4px 12px", borderRadius: 6, border: "none", fontFamily: "inherit", fontSize: 11, fontWeight: mepView === k ? 700 : 400, cursor: "pointer", background: mepView === k ? crit.bg : "transparent", color: mepView === k ? crit.color : "#6B7280", boxShadow: mepView === k ? `0 0 0 1px ${crit.border}` : "none", transition: "all 0.15s" }}>
+          {[["etapes", "📋 Étapes"], ["schema", "🔀 Schéma"], ["schema-fn", "📐 Schéma fn."]].map(([k, label]) => (
+            <button key={k} onClick={() => setMepView(k)} style={{ padding: "4px 12px", borderRadius: 6, border: "none", fontFamily: "inherit", fontSize: 11, fontWeight: mepView === k ? 700 : 400, cursor: "pointer", background: mepView === k ? crit.bg : "transparent", color: mepView === k ? crit.color : "#6B7280", boxShadow: mepView === k ? `0 0 0 1px ${crit.border}` : "none", transition: "all 0.15s", whiteSpace: "nowrap" }}>
               {label}
             </button>
           ))}
@@ -435,6 +725,11 @@ function MepEditor({ sel, upd, addStep, delStep, moveStep, updStep, toggleExp, e
       {/* Vue Schéma — flux fléché */}
       {mepView === "schema" && (
         <MepSchema sel={sel} updStep={updStep} delStep={delStep} addStep={addStep} />
+      )}
+
+      {/* Vue Schéma fonctionnel — flux horizontal */}
+      {mepView === "schema-fn" && (
+        <FunctionalSchema sel={sel} updStep={updStep} delStep={delStep} addStep={addStep} />
       )}
 
       {/* Vue Étapes */}
@@ -556,6 +851,7 @@ export default function WorkflowEditor() {
   const [expSteps, setExpSteps] = useState(new Set());
   const [filterType, setFilter] = useState("all");
   const [mepPicker, setMepPicker] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(true);
 
   const persist = (list) => { setWfs(list); saveWorkflows(list); };
   const sel = wfs.find(w => w.id === selId);
@@ -626,7 +922,8 @@ export default function WorkflowEditor() {
   return (
     <div style={{ display: "flex", height: "100%", background: "#0B0F19", color: "#F3F4F6", fontFamily: "'Inter', sans-serif" }}>
 
-      {/* ── PANNEAU GAUCHE ── */}
+      {/* ── PANNEAU GAUCHE (rétractable) ── */}
+      {sidebarOpen && (
       <div style={{ width: 295, minWidth: 295, borderRight: "1px solid rgba(255,255,255,0.07)", display: "flex", flexDirection: "column", background: "#0D1117" }}>
 
         {/* En-tête + boutons créer */}
@@ -718,8 +1015,20 @@ export default function WorkflowEditor() {
           })}
         </div>
       </div>
+      )}
 
       {/* ── PANNEAU DROIT ── */}
+      <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden", position: "relative" }}>
+        {/* Bouton toggle sidebar */}
+        <button onClick={() => setSidebarOpen(o => !o)} style={{
+          position: "absolute", top: 10, left: 10, zIndex: 10,
+          display: "flex", alignItems: "center", justifyContent: "center",
+          width: 32, height: 32, borderRadius: 8,
+          background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)",
+          color: sidebarOpen ? "#6B7280" : "#818CF8", cursor: "pointer", transition: "all 0.15s",
+        }} title={sidebarOpen ? "Masquer la liste" : "Afficher la liste"}>
+          {sidebarOpen ? <PanelLeftClose size={16} /> : <PanelLeftOpen size={16} />}
+        </button>
       {!sel ? (
         <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center" }}>
           <div style={{ textAlign: "center", color: "#374151" }}>
@@ -733,6 +1042,7 @@ export default function WorkflowEditor() {
       ) : (
         <GenericEditor sel={sel} upd={upd} addStep={addStep} delStep={delStep} moveStep={moveStep} updStep={updStep} toggleExp={toggleExp} expSteps={expSteps} />
       )}
+      </div>
     </div>
   );
 }

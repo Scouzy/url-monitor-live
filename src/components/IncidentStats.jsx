@@ -328,8 +328,9 @@ export default function IncidentStats({ isMobile = false, tickets = [], loading 
         </button>
 
         {lastLoad && (
-          <span style={{ fontSize: 10, color: "#4B5563" }}>
-            Dernière maj : {new Date(lastLoad).toLocaleTimeString("fr-FR")}
+          <span style={{ fontSize: 10, color: "#4B5563", display: "flex", alignItems: "center", gap: 5 }}>
+            <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#34D399", boxShadow: "0 0 6px #34D399", animation: "pulse 2s ease-in-out infinite" }} />
+            {new Date(lastLoad).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}
           </span>
         )}
 

@@ -2,7 +2,7 @@ import { useState, useMemo, useSyncExternalStore } from "react";
 import {
   Cpu, MemoryStick, HardDrive, TrendingUp, AlertTriangle,
   Layers, Eye, Flame, Trophy, Lightbulb, AppWindow,
-  X, CheckCircle, ClipboardList, GitBranch, Network,
+  X, CheckCircle, ClipboardList, GitBranch, Network, Activity,
 } from "lucide-react";
 import {
   ResponsiveContainer, ComposedChart, Line, XAxis, YAxis, Tooltip,
@@ -194,7 +194,8 @@ export default function CapacityPlanning({ servers: propServers }) {
   const servers = propServers || storeServers;
   const snapshots = useMemo(() => loadSnapshots(), [servers]);
   const [metric, setMetric] = useState("cpu");
-  const [selectedServer, setSelectedServer] = useState(null);
+  const [selectedServerId, setSelectedServerId] = useState(null);
+  const selectedServer = selectedServerId ? servers.find(s => s.id === selectedServerId) : null;
   const [actionReco, setActionReco] = useState(null);
   const isAll = metric === "all";
   const meta = METRICS.find(m => m.id === metric) ?? { id: "all", label: "Vue globale", color: "#9CA3AF" };
@@ -214,6 +215,18 @@ export default function CapacityPlanning({ servers: propServers }) {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+
+      {/* ── Indicateur live ── */}
+      {(() => {
+        const lastRefresh = parseInt(localStorage.getItem("capacity-itcare-last-refresh") || "0");
+        if (!lastRefresh) return null;
+        return (
+          <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 10, color: "#6B7280" }}>
+            <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#34D399", boxShadow: "0 0 6px #34D399", animation: "pulse 2s ease-in-out infinite" }} />
+            Données en temps réel — dernier refresh {new Date(lastRefresh).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}
+          </div>
+        );
+      })()}
 
       {/* Switch métrique */}
       <div style={{ display: "flex", gap: 8 }}>
@@ -301,7 +314,7 @@ export default function CapacityPlanning({ servers: propServers }) {
                 {cardTitle(Trophy, `Top 5 ${m.label}`)}
                 <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                   {m.top5.map((s, i) => (
-                    <div key={s.id} onClick={() => setSelectedServer(s)}
+                    <div key={s.id} onClick={() => setSelectedServerId(s.id)}
                       style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 10px", cursor: "pointer", borderRadius: 8,
                         background: i === 0 ? "rgba(248,113,113,0.05)" : "rgba(255,255,255,0.02)",
                         border: `1px solid ${i === 0 ? "rgba(248,113,113,0.2)" : "rgba(255,255,255,0.05)"}`,
@@ -432,15 +445,15 @@ export default function CapacityPlanning({ servers: propServers }) {
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
             {top5.map((s, i) => (
               <div key={s.id}
-                onClick={() => setSelectedServer(s)}
+                onClick={() => setSelectedServerId(s.id)}
                 style={{
                   display: "flex", alignItems: "center", gap: 10, padding: "8px 12px",
-                  background: selectedServer?.id === s.id ? "rgba(99,102,241,0.1)" : i === 0 ? "rgba(248,113,113,0.05)" : "rgba(255,255,255,0.02)",
-                  border: `1px solid ${selectedServer?.id === s.id ? "rgba(99,102,241,0.4)" : i === 0 ? "rgba(248,113,113,0.2)" : "rgba(255,255,255,0.05)"}`,
+                  background: selectedServerId === s.id ? "rgba(99,102,241,0.1)" : i === 0 ? "rgba(248,113,113,0.05)" : "rgba(255,255,255,0.02)",
+                  border: `1px solid ${selectedServerId === s.id ? "rgba(99,102,241,0.4)" : i === 0 ? "rgba(248,113,113,0.2)" : "rgba(255,255,255,0.05)"}`,
                   borderRadius: 10, cursor: "pointer", transition: "background 0.15s, border-color 0.15s",
                 }}
-                onMouseEnter={e => { if (selectedServer?.id !== s.id) e.currentTarget.style.background = "rgba(255,255,255,0.05)"; }}
-                onMouseLeave={e => { if (selectedServer?.id !== s.id) e.currentTarget.style.background = i === 0 ? "rgba(248,113,113,0.05)" : "rgba(255,255,255,0.02)"; }}
+                onMouseEnter={e => { if (selectedServerId !== s.id) e.currentTarget.style.background = "rgba(255,255,255,0.05)"; }}
+                onMouseLeave={e => { if (selectedServerId !== s.id) e.currentTarget.style.background = i === 0 ? "rgba(248,113,113,0.05)" : "rgba(255,255,255,0.02)"; }}
               >
                 <span style={{
                   width: 22, height: 22, borderRadius: 7, flexShrink: 0,
@@ -531,11 +544,11 @@ export default function CapacityPlanning({ servers: propServers }) {
       {/* ── Modal détail serveur ── */}
       {selectedServer && (
         <div
-          onClick={() => setSelectedServer(null)}
+          onClick={() => setSelectedServerId(null)}
           style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.92)", zIndex: 1000, display: "flex", alignItems: "flex-start", justifyContent: "center", padding: "28px 16px", overflowY: "auto" }}
         >
           <div onClick={e => e.stopPropagation()}>
-            <ServerDetail server={selectedServer} snapshots={snapshots} onClose={() => setSelectedServer(null)} width="min(96vw, 960px)"
+            <ServerDetail server={selectedServer} snapshots={snapshots} onClose={() => setSelectedServerId(null)} width="min(96vw, 960px)"
               overrideStyle={{ background: "#0D1117", border: "1px solid rgba(255,255,255,0.12)", maxHeight: "none" }} />
           </div>
         </div>

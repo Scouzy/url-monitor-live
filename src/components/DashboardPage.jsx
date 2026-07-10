@@ -218,8 +218,21 @@ export default function DashboardPage({ groups = [], allUrls = [], allServers = 
   const eventLabels = { offline: "Panne", online: "Rétabli", ssl_expiry: "SSL", server_alert: "Serveur", capacity_alert: "Capacité" };
   const uptimeColor = uptimePct >= 90 ? "#34D399" : uptimePct >= 70 ? "#FBBF24" : "#F87171";
 
+  /* Dernier check URL pour l'indicateur live */
+  const lastUrlCheck = allUrls
+    .map(u => u.lastCheck ? new Date(u.lastCheck).getTime() : 0)
+    .reduce((max, t) => Math.max(max, t), 0);
+
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 26, paddingBottom: 24 }}>
+
+      {/* ── Indicateur live ── */}
+      {lastUrlCheck > 0 && (
+        <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 10, color: "#6B7280" }}>
+          <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#34D399", boxShadow: "0 0 6px #34D399", animation: "pulse 2s ease-in-out infinite" }} />
+          Données en temps réel — dernier check {new Date(lastUrlCheck).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
+        </div>
+      )}
 
       {/* ══ LIGNE 1 : Vue d'ensemble URL ══════════════════════════ */}
       <div style={{ display: "flex", gap: 20, alignItems: "stretch", flexWrap: "wrap" }}>
