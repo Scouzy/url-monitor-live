@@ -53,8 +53,10 @@ Le serveur démarre sur `http://localhost:3210`.
 
 ### Auth
 - `POST /api/auth/login` — connexion
+- `POST /api/auth/logout` — déconnexion (trace audit)
 - `POST /api/auth/register` — créer un compte (superadmin)
 - `GET /api/auth/me` — profil courant
+- `POST /api/auth/heartbeat` — ping frontend (synchro)
 - `GET /api/auth/users` — liste des utilisateurs (superadmin)
 - `PUT /api/auth/users/:id` — modifier un utilisateur
 - `DELETE /api/auth/users/:id` — supprimer un utilisateur
@@ -69,6 +71,7 @@ Le serveur démarre sur `http://localhost:3210`.
 - `POST /api/urls/:id/steps/:stepId/image` — upload image de référence
 - `DELETE /api/urls/:id/steps/:stepId/image` — supprimer image
 - `GET /api/urls/images/:filename` — servir image de référence
+- `POST /api/urls/import` — importer les URLs depuis le frontend
 
 ### Compare
 - `POST /api/compare/:urlConfigId` — exécuter test + comparaison
@@ -82,6 +85,14 @@ Le serveur démarre sur `http://localhost:3210`.
 - `PUT /api/apis/:id` — modifier
 - `DELETE /api/apis/:id` — supprimer
 - `POST /api/apis/:id/test` — tester la connexion
+
+### Audit
+- `GET /api/audit?category=&limit=` — liste des logs (filtre par catégorie)
+- `POST /api/audit` — recevoir un log depuis le frontend
+- `DELETE /api/audit` — vider les logs (superadmin)
+
+### Health
+- `GET /api/health` — statut du backend
 
 ## Structure
 
