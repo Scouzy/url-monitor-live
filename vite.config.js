@@ -1126,8 +1126,218 @@ function itcarePlugin() {
   };
 }
 
+/* ── Plugin multi-check : supervision multi-étapes (HTTP + Playwright fallback) ── */
+function multiCheckPlugin() {
+  let _pwBrowser = null;
+  async function getBrowser() {
+    if (_pwBrowser) return _pwBrowser;
+    const { chromium } = await import('playwright');
+    _pwBrowser = await chromium.launch({ headless: true });
+    return _pwBrowser;
+  }
+
+  /* Mode HTTP : fetch avec gestion manuelle des cookies */
+  async function httpMultiCheck(cfg) {
+    const steps = [];
+    const cookies = {};
+    const headers = (extra = {}) => ({
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+      'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+      'Accept-Language': 'fr-FR,fr;q=0.9',
+      ...extra,
+    });
+
+    const parseCookies = (resp) => {
+      const raw = resp.headers.get('set-cookie');
+      if (!raw) return;
+      raw.split(',').forEach(c => {
+        const m = c.trim().match(/^([^=]+)=([^;]*)/);
+        if (m) cookies[m[1]] = m[2];
+      });
+    };
+    const cookieStr = () => Object.entries(cookies).map(([k, v]) => `${k}=${v}`).join('; ');
+
+    /* Étape 1 : atteindre l'URL */
+    try {
+      const t0 = performance.now();
+      const r = await fetch(cfg.url, { headers: headers(), redirect: 'follow', signal: AbortSignal.timeout(15000) });
+      parseCookies(r);
+      steps.push({ name: 'Accès URL', ok: r.ok, status: r.status, time: Math.round(performance.now() - t0) });
+    } catch (e) {
+      steps.push({ name: 'Accès URL', ok: false, status: e.name === 'TimeoutError' ? 'Timeout' : 'Erreur', time: 0, error: e.message });
+      return { steps, ok: false };
+    }
+
+    /* Étape 2 : authentification (si configurée) */
+    if (cfg.authUrl && cfg.login && cfg.password) {
+      try {
+        const t0 = performance.now();
+        const body = new URLSearchParams();
+        body.append(cfg.loginField || 'username', cfg.login);
+        body.append(cfg.passwordField || 'password', cfg.password);
+        const r = await fetch(cfg.authUrl, {
+          method: 'POST',
+          headers: headers({ 'Content-Type': 'application/x-www-form-urlencoded', Cookie: cookieStr() }),
+          body: body.toString(),
+          redirect: 'manual',
+          signal: AbortSignal.timeout(15000),
+        });
+        parseCookies(r);
+        const ok = r.status === 302 || r.status === 301 || (r.ok && r.status !== 401 && r.status !== 403);
+        steps.push({ name: 'Authentification', ok, status: r.status, time: Math.round(performance.now() - t0) });
+        if (!ok) {
+          return { steps, ok: false };
+        }
+      } catch (e) {
+        steps.push({ name: 'Authentification', ok: false, status: 'Erreur', time: 0, error: e.message });
+        return { steps, ok: false };
+      }
+    }
+
+    /* Étape 3 : page d'accueil */
+    if (cfg.homeUrl) {
+      try {
+        const t0 = performance.now();
+        const r = await fetch(cfg.homeUrl, { headers: headers({ Cookie: cookieStr() }), redirect: 'follow', signal: AbortSignal.timeout(15000) });
+        steps.push({ name: 'Page d\'accueil', ok: r.ok, status: r.status, time: Math.round(performance.now() - t0) });
+        if (!r.ok) return { steps, ok: false };
+      } catch (e) {
+        steps.push({ name: 'Page d\'accueil', ok: false, status: 'Erreur', time: 0, error: e.message });
+        return { steps, ok: false };
+      }
+    }
+
+    /* Étape 4 : accès onglet */
+    if (cfg.tabUrl) {
+      try {
+        const t0 = performance.now();
+        const r = await fetch(cfg.tabUrl, { headers: headers({ Cookie: cookieStr() }), redirect: 'follow', signal: AbortSignal.timeout(15000) });
+        steps.push({ name: 'Accès onglet', ok: r.ok, status: r.status, time: Math.round(performance.now() - t0) });
+      } catch (e) {
+        steps.push({ name: 'Accès onglet', ok: false, status: 'Erreur', time: 0, error: e.message });
+      }
+    }
+
+    return { steps, ok: steps.every(s => s.ok) };
+  }
+
+  /* Mode Playwright : navigateur headless pour SPA / JS */
+  async function playwrightMultiCheck(cfg) {
+    const browser = await getBrowser();
+    const page = await browser.newPage();
+    const steps = [];
+
+    try {
+      /* Étape 1 : atteindre l'URL */
+      try {
+        const t0 = performance.now();
+        const resp = await page.goto(cfg.url, { waitUntil: 'domcontentloaded', timeout: 15000 });
+        steps.push({ name: 'Accès URL', ok: resp?.ok() ?? false, status: resp?.status() || 0, time: Math.round(performance.now() - t0) });
+      } catch (e) {
+        steps.push({ name: 'Accès URL', ok: false, status: 'Erreur', time: 0, error: e.message });
+        return { steps, ok: false };
+      }
+
+      /* Étape 2 : authentification */
+      if (cfg.authUrl && cfg.login && cfg.password) {
+        try {
+          const t0 = performance.now();
+          await page.goto(cfg.authUrl, { waitUntil: 'domcontentloaded', timeout: 15000 });
+          const lf = cfg.loginField || 'input[name="username"], input[type="text"], input[name="login"]';
+          const pf = cfg.passwordField || 'input[name="password"], input[type="password"]';
+          await page.fill(lf, cfg.login).catch(() => {});
+          await page.fill(pf, cfg.password).catch(() => {});
+          /* Chercher le bouton submit */
+          await page.click('button[type="submit"], input[type="submit"], button:has-text("login"), button:has-text("Login"), button:has-text("Se connecter")').catch(() => {});
+          await page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {});
+          const ok = !page.url().includes('login') && page.url() !== cfg.authUrl;
+          steps.push({ name: 'Authentification', ok, status: ok ? 200 : 401, time: Math.round(performance.now() - t0) });
+          if (!ok) return { steps, ok: false };
+        } catch (e) {
+          steps.push({ name: 'Authentification', ok: false, status: 'Erreur', time: 0, error: e.message });
+          return { steps, ok: false };
+        }
+      }
+
+      /* Étape 3 : page d'accueil */
+      if (cfg.homeUrl) {
+        try {
+          const t0 = performance.now();
+          const resp = await page.goto(cfg.homeUrl, { waitUntil: 'domcontentloaded', timeout: 15000 });
+          steps.push({ name: 'Page d\'accueil', ok: resp?.ok() ?? false, status: resp?.status() || 0, time: Math.round(performance.now() - t0) });
+          if (!resp?.ok()) return { steps, ok: false };
+        } catch (e) {
+          steps.push({ name: 'Page d\'accueil', ok: false, status: 'Erreur', time: 0, error: e.message });
+          return { steps, ok: false };
+        }
+      }
+
+      /* Étape 4 : accès onglet */
+      if (cfg.tabUrl) {
+        try {
+          const t0 = performance.now();
+          const resp = await page.goto(cfg.tabUrl, { waitUntil: 'domcontentloaded', timeout: 15000 });
+          steps.push({ name: 'Accès onglet', ok: resp?.ok() ?? false, status: resp?.status() || 0, time: Math.round(performance.now() - t0) });
+        } catch (e) {
+          steps.push({ name: 'Accès onglet', ok: false, status: 'Erreur', time: 0, error: e.message });
+        }
+      }
+
+      return { steps, ok: steps.every(s => s.ok) };
+    } finally {
+      await page.close().catch(() => {});
+    }
+  }
+
+  return {
+    name: 'multi-check-middleware',
+    configureServer(server) {
+      server.middlewares.use('/api/multi-check', async (req, res) => {
+        if (req.method !== 'POST') {
+          res.statusCode = 405;
+          return res.end('Method Not Allowed');
+        }
+        let body = '';
+        for await (const chunk of req) body += chunk;
+        res.setHeader('Content-Type', 'application/json');
+        res.setHeader('Access-Control-Allow-Origin', '*');
+
+        let cfg;
+        try { cfg = JSON.parse(body); } catch { return res.end(JSON.stringify({ error: 'Invalid JSON' })); }
+        if (!cfg.url) return res.end(JSON.stringify({ error: 'Missing url' }));
+
+        console.log('\x1b[36m[MultiCheck]\x1b[0m', cfg.url, cfg.mode || 'http');
+
+        try {
+          /* Étape 1 : essayer HTTP d'abord */
+          let result = await httpMultiCheck(cfg);
+
+          /* Si l'auth échoue ou si le mode est "playwright", utiliser Playwright */
+          const authFailed = result.steps.some(s => s.name === 'Authentification' && !s.ok);
+          const forcePW = cfg.mode === 'playwright';
+
+          if ((authFailed || forcePW) && cfg.authUrl) {
+            console.log('\x1b[36m[MultiCheck]\x1b[0m Fallback Playwright pour', cfg.url);
+            try {
+              result = await playwrightMultiCheck(cfg);
+            } catch (e) {
+              console.log('\x1b[36m[MultiCheck]\x1b[0m Playwright error:', e.message);
+              /* Garder le résultat HTTP si Playwright échoue */
+            }
+          }
+
+          res.end(JSON.stringify(result));
+        } catch (e) {
+          res.statusCode = 500;
+          res.end(JSON.stringify({ error: e.message, steps: [], ok: false }));
+        }
+      });
+    },
+  };
+}
+
 export default defineConfig({
-  plugins: [react(), sslCheckPlugin(), screenshotPlugin(), lanSyncPlugin(), itcarePlugin()],
+  plugins: [react(), sslCheckPlugin(), screenshotPlugin(), lanSyncPlugin(), itcarePlugin(), multiCheckPlugin()],
   server: {
     port: 5173,
     strictPort: true,

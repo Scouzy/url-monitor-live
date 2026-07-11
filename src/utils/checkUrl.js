@@ -24,3 +24,29 @@ export async function checkUrl(url) {
     return { isUp: false, responseTime: elapsed, status: "Erreur" };
   }
 }
+
+export async function checkMultiStep(monitoring) {
+  const start = performance.now();
+  try {
+    const resp = await fetch("/api/multi-check", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(monitoring),
+      signal: AbortSignal.timeout(60000),
+    });
+    const data = await resp.json();
+    const elapsed = Math.round(performance.now() - start);
+    if (data.error) {
+      return { isUp: false, responseTime: elapsed, status: "Erreur", steps: [], error: data.error };
+    }
+    return {
+      isUp: data.ok,
+      responseTime: elapsed,
+      status: data.ok ? "OK" : "Échec",
+      steps: data.steps || [],
+    };
+  } catch (e) {
+    const elapsed = Math.round(performance.now() - start);
+    return { isUp: false, responseTime: elapsed, status: e.name === "TimeoutError" ? "Timeout" : "Erreur", steps: [] };
+  }
+}

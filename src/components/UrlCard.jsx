@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import {
   RefreshCw, Trash2, Zap, Clock, Globe, ExternalLink,
   ImageOff, Loader, KeyRound, Eye, EyeOff,
-  User, Lock, Check, Pencil, X, Pause, Play,
+  User, Lock, Check, Pencil, X, Pause, Play, Activity,
 } from "lucide-react";
 import { STATUS_CONFIG, getStatus, formatTime } from "../constants";
 import { computeMetrics, formatUptime, formatMs, formatDuration, uptimeColor } from "../utils/metrics";
@@ -188,7 +188,7 @@ const BTN = { background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,
 
 const GROUP_BADGE = { fontSize: 10, padding: "2px 9px", borderRadius: 10, background: "rgba(99,102,241,0.28)", color: "#C4B5FD", border: "1px solid rgba(139,92,246,0.45)", whiteSpace: "nowrap", flexShrink: 0, fontWeight: 600, letterSpacing: "0.01em" };
 
-export default function UrlCard({ entry, index = 0, viewMode = "grid", groupName = null, onRemove, onCheck, checking, onUpdateCredentials, onUpdateUrl, onTogglePause }) {
+export default function UrlCard({ entry, index = 0, viewMode = "grid", groupName = null, onRemove, onCheck, checking, onUpdateCredentials, onUpdateUrl, onTogglePause, onUpdateMonitoring }) {
   const status = getStatus(entry);
   const cfg = STATUS_CONFIG[status];
   const Icon = cfg.icon;
@@ -201,6 +201,17 @@ export default function UrlCard({ entry, index = 0, viewMode = "grid", groupName
   const [previewUrl, setPreviewUrl] = useState(entry.credentials?.previewUrl || "");
   const [saved, setSaved] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [monOpen, setMonOpen] = useState(false);
+  const mon = entry.monitoring || { mode: "simple", authUrl: "", loginField: "username", passwordField: "password", login: "", password: "", homeUrl: "", tabUrl: "", steps: [] };
+  const [monMode, setMonMode] = useState(mon.mode || "simple");
+  const [monAuthUrl, setMonAuthUrl] = useState(mon.authUrl || "");
+  const [monLoginField, setMonLoginField] = useState(mon.loginField || "username");
+  const [monPasswordField, setMonPasswordField] = useState(mon.passwordField || "password");
+  const [monLogin, setMonLogin] = useState(mon.login || "");
+  const [monPassword, setMonPassword] = useState(mon.password || "");
+  const [monHomeUrl, setMonHomeUrl] = useState(mon.homeUrl || "");
+  const [monTabUrl, setMonTabUrl] = useState(mon.tabUrl || "");
+  const [monSaved, setMonSaved] = useState(false);
 
   const [metricsOpen, setMetricsOpen] = useState(false);
   const [editing, setEditing] = useState(false);
@@ -349,6 +360,24 @@ export default function UrlCard({ entry, index = 0, viewMode = "grid", groupName
     setSaved(true);
     setTimeout(() => setSaved(false), 2500);
   };
+
+  const saveMonitoring = () => {
+    onUpdateMonitoring?.({
+      mode: monMode,
+      authUrl: monAuthUrl,
+      loginField: monLoginField,
+      passwordField: monPasswordField,
+      login: monLogin,
+      password: monPassword,
+      homeUrl: monHomeUrl,
+      tabUrl: monTabUrl,
+      steps: mon.steps || [],
+    });
+    setMonSaved(true);
+    setTimeout(() => setMonSaved(false), 2500);
+  };
+
+  const hasMonitoring = mon.mode === "authenticated" && !!mon.authUrl;
 
   const connect = async () => {
     const text = [
@@ -819,6 +848,130 @@ export default function UrlCard({ entry, index = 0, viewMode = "grid", groupName
               </button>
             </div>
 
+          </div>
+        )}
+      </div>
+
+      {/* ── Section Monitoring multi-étapes ── */}
+      <div style={{ borderTop: "1px solid rgba(255,255,255,0.04)" }}>
+        <button
+          onClick={() => setMonOpen(o => !o)}
+          style={{
+            width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between",
+            padding: "8px 14px", background: "rgba(0,0,0,0.15)", border: "none", cursor: "pointer",
+            color: monOpen ? "#818CF8" : "#4B5563", transition: "color 0.2s, background 0.2s",
+          }}
+          onMouseEnter={e => { e.currentTarget.style.background = "rgba(99,102,241,0.07)"; e.currentTarget.style.color = "#818CF8"; }}
+          onMouseLeave={e => { e.currentTarget.style.background = "rgba(0,0,0,0.15)"; e.currentTarget.style.color = monOpen ? "#818CF8" : "#4B5563"; }}
+        >
+          <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, fontWeight: 600 }}>
+            <Activity size={12} />
+            Supervision multi-étapes
+            {hasMonitoring && (
+              <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#818CF8", display: "inline-block" }} />
+            )}
+          </div>
+          <div style={{
+            fontSize: 10, transform: monOpen ? "rotate(180deg)" : "rotate(0deg)",
+            transition: "transform 0.2s", lineHeight: 1,
+          }}>▼</div>
+        </button>
+
+        {monOpen && (
+          <div style={{ padding: "12px 14px", display: "flex", flexDirection: "column", gap: 9, animation: "fadeIn 0.15s ease" }}>
+
+            {/* Mode toggle */}
+            <div style={{ display: "flex", gap: 4, background: "rgba(0,0,0,0.25)", borderRadius: 8, padding: 3 }}>
+              {[["simple", "Simple (HEAD)"], ["authenticated", "Authentifiée"]].map(([k, label]) => (
+                <button key={k} onClick={() => setMonMode(k)} style={{
+                  flex: 1, padding: "5px 8px", borderRadius: 6, border: "none", fontFamily: "inherit",
+                  fontSize: 10, fontWeight: monMode === k ? 700 : 400, cursor: "pointer",
+                  background: monMode === k ? "rgba(99,102,241,0.15)" : "transparent",
+                  color: monMode === k ? "#818CF8" : "#6B7280", transition: "all 0.15s",
+                }}>{label}</button>
+              ))}
+            </div>
+
+            {monMode === "authenticated" && (
+              <>
+                <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                  <span style={{ fontSize: 10, color: "#4B5563", fontWeight: 600 }}>URL de connexion (login)</span>
+                  <input type="url" value={monAuthUrl} onChange={e => { setMonAuthUrl(e.target.value); setMonSaved(false); }}
+                    placeholder="https://app.example.com/login" autoComplete="off"
+                    style={{ background: "#0D1117", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 7, color: "#E5E7EB", fontSize: 11, padding: "5px 9px", outline: "none", boxSizing: "border-box", width: "100%" }} />
+                </div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                    <span style={{ fontSize: 10, color: "#4B5563", fontWeight: 600 }}>Champ login (name/CSS)</span>
+                    <input value={monLoginField} onChange={e => { setMonLoginField(e.target.value); setMonSaved(false); }}
+                      placeholder="username" autoComplete="off"
+                      style={{ background: "#0D1117", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 7, color: "#E5E7EB", fontSize: 11, padding: "5px 9px", outline: "none", boxSizing: "border-box", width: "100%" }} />
+                  </div>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                    <span style={{ fontSize: 10, color: "#4B5563", fontWeight: 600 }}>Champ mot de passe</span>
+                    <input value={monPasswordField} onChange={e => { setMonPasswordField(e.target.value); setMonSaved(false); }}
+                      placeholder="password" autoComplete="off"
+                      style={{ background: "#0D1117", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 7, color: "#E5E7EB", fontSize: 11, padding: "5px 9px", outline: "none", boxSizing: "border-box", width: "100%" }} />
+                  </div>
+                </div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                    <span style={{ fontSize: 10, color: "#4B5563", fontWeight: 600 }}>Identifiant</span>
+                    <input value={monLogin} onChange={e => { setMonLogin(e.target.value); setMonSaved(false); }}
+                      placeholder="admin" autoComplete="off"
+                      style={{ background: "#0D1117", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 7, color: "#E5E7EB", fontSize: 11, padding: "5px 9px", outline: "none", boxSizing: "border-box", width: "100%" }} />
+                  </div>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                    <span style={{ fontSize: 10, color: "#4B5563", fontWeight: 600 }}>Mot de passe</span>
+                    <input type="password" value={monPassword} onChange={e => { setMonPassword(e.target.value); setMonSaved(false); }}
+                      placeholder="••••••••" autoComplete="off"
+                      style={{ background: "#0D1117", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 7, color: "#E5E7EB", fontSize: 11, padding: "5px 9px", outline: "none", boxSizing: "border-box", width: "100%" }} />
+                  </div>
+                </div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                  <span style={{ fontSize: 10, color: "#4B5563", fontWeight: 600 }}>Page d'accueil (après login)</span>
+                  <input type="url" value={monHomeUrl} onChange={e => { setMonHomeUrl(e.target.value); setMonSaved(false); }}
+                    placeholder="https://app.example.com/dashboard" autoComplete="off"
+                    style={{ background: "#0D1117", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 7, color: "#E5E7EB", fontSize: 11, padding: "5px 9px", outline: "none", boxSizing: "border-box", width: "100%" }} />
+                </div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                  <span style={{ fontSize: 10, color: "#4B5563", fontWeight: 600 }}>Onglet à vérifier (optionnel)</span>
+                  <input type="url" value={monTabUrl} onChange={e => { setMonTabUrl(e.target.value); setMonSaved(false); }}
+                    placeholder="https://app.example.com/monitoring" autoComplete="off"
+                    style={{ background: "#0D1117", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 7, color: "#E5E7EB", fontSize: 11, padding: "5px 9px", outline: "none", boxSizing: "border-box", width: "100%" }} />
+                </div>
+              </>
+            )}
+
+            {/* Résultats des étapes (dernier check) */}
+            {mon.steps && mon.steps.length > 0 && (
+              <div style={{ display: "flex", flexDirection: "column", gap: 4, marginTop: 4 }}>
+                <span style={{ fontSize: 10, color: "#4B5563", fontWeight: 600 }}>Dernier check :</span>
+                {mon.steps.map((s, i) => (
+                  <div key={i} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 10 }}>
+                    <span style={{ width: 7, height: 7, borderRadius: "50%", background: s.ok ? "#34D399" : "#F87171", flexShrink: 0 }} />
+                    <span style={{ color: "#9CA3AF", flex: 1 }}>{s.name}</span>
+                    <span style={{ color: s.ok ? "#34D399" : "#F87171", fontWeight: 600 }}>{s.status}</span>
+                    <span style={{ color: "#4B5563", fontFamily: "monospace" }}>{s.time}ms</span>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Bouton enregistrer */}
+            <button
+              onClick={saveMonitoring}
+              style={{
+                display: "flex", alignItems: "center", justifyContent: "center", gap: 5,
+                padding: "7px 0", borderRadius: 7, fontSize: 11, fontWeight: 600, cursor: "pointer",
+                border: `1px solid ${monSaved ? "rgba(52,211,153,0.3)" : "rgba(255,255,255,0.1)"}`,
+                background: monSaved ? "rgba(52,211,153,0.1)" : "rgba(255,255,255,0.04)",
+                color: monSaved ? "#34D399" : "#6B7280",
+                transition: "all 0.2s",
+              }}
+            >
+              {monSaved ? <><Check size={11} /> Enregistré</> : <><Activity size={11} /> Enregistrer</>}
+            </button>
           </div>
         )}
       </div>

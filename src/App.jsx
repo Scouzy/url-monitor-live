@@ -1,7 +1,7 @@
 ﻿import { useState, useEffect, useRef, useCallback, useSyncExternalStore, useMemo } from "react";
 import { Globe, Plus, RefreshCw, Pause, Play, Wifi, WifiOff, Zap, LayoutGrid, List, Search, X, Activity, AlertTriangle, Settings, Bell, BellOff, Lock, CheckCircle, Server, Menu } from "lucide-react";2.
 import { STATUS, DEFAULT_INTERVAL, MAX_HISTORY, getStatus } from "./constants";
-import { checkUrl } from "./utils/checkUrl";
+import { checkUrl, checkMultiStep } from "./utils/checkUrl";
 import { checkSsl } from "./utils/checkSsl";
 import { loadGroups, saveGroups, getDefaultGroups, makeEntry, makeGroup } from "./utils/storage";
 import Sidebar from "./components/Sidebar";
@@ -363,7 +363,7 @@ export default function App() {
     }
   }, []);
 
-  const applyResult = useCallback((groupId, urlId, urlStr, result) => {
+  const applyResult = useCallback((groupId, urlId, urlStr, result, monitoring) => {
     const prev = prevStatusRef.current[urlId];
     const changed = prev !== undefined && prev !== result.isUp;
     if (changed) {
@@ -389,27 +389,44 @@ export default function App() {
         ...g, urls: g.urls.map(u => {
           if (u.id !== urlId) return u;
           const newHistory = [...u.history, { ts: Date.now(), isUp: result.isUp, rt: result.responseTime }].slice(-MAX_HISTORY);
-          return { ...u, isUp: result.isUp, responseTime: result.responseTime, lastCheck: new Date(), history: newHistory, status: result.status };
+          const updated = { ...u, isUp: result.isUp, responseTime: result.responseTime, lastCheck: new Date(), history: newHistory, status: result.status };
+          if (result.steps) {
+            updated.monitoring = { ...u.monitoring, steps: result.steps };
+          }
+          return updated;
         }),
       };
     }));
     setCheckingIds(prev => { const s = new Set(prev); s.delete(urlId); return s; });
   }, [addToast]);
 
-  const runCheck = useCallback((groupId, urlId, urlStr) => {
+  const runCheck = useCallback((groupId, urlId, urlStr, monitoring) => {
     setCheckingIds(cs => new Set(cs).add(urlId));
-    checkUrl(urlStr).then(result => applyResult(groupId, urlId, urlStr, result));
+    if (monitoring && monitoring.mode === "authenticated" && monitoring.authUrl) {
+      checkMultiStep({
+        mode: monitoring.mode === "playwright" ? "playwright" : "http",
+        url: urlStr,
+        authUrl: monitoring.authUrl,
+        loginField: monitoring.loginField,
+        passwordField: monitoring.passwordField,
+        login: monitoring.login,
+        password: monitoring.password,
+        homeUrl: monitoring.homeUrl,
+        tabUrl: monitoring.tabUrl,
+      }).then(result => applyResult(groupId, urlId, urlStr, result, monitoring));
+    } else {
+      checkUrl(urlStr).then(result => applyResult(groupId, urlId, urlStr, result));
+    }
   }, [applyResult]);
 
   const runAllChecks = useCallback(() => {
     const current = groupsRef.current;
     current.forEach(g => g.urls.forEach(u => {
-      if (u.paused) return; /* URL en pause — monitoring suspendu */
-      setCheckingIds(cs => new Set(cs).add(u.id));
-      checkUrl(u.url).then(result => applyResult(g.id, u.id, u.url, result));
+      if (u.paused) return;
+      runCheck(g.id, u.id, u.url, u.monitoring);
       runSslCheck(g.id, u.id, u.url);
     }));
-  }, [applyResult, runSslCheck]);
+  }, [runCheck, runSslCheck]);
 
   useEffect(() => { runAllChecks(); }, []);
 
@@ -438,7 +455,7 @@ export default function App() {
     saveGroups(next);
     setInput("");
     setTimeout(() => {
-      runCheck(activeGroupId, entry.id, entry.url);
+      runCheck(activeGroupId, entry.id, entry.url, entry.monitoring);
       runSslCheck(activeGroupId, entry.id, entry.url, true);
     }, 50);
   };
@@ -498,7 +515,7 @@ export default function App() {
     });
     setGroups(next);
     saveGroups(next);
-    setTimeout(() => runCheck(groupId, urlId, newUrl), 100);
+    setTimeout(() => runCheck(groupId, urlId, newUrl, u.monitoring), 100);
   };
 
   /* ── Drag & drop réordonnancement ── */
@@ -533,7 +550,7 @@ export default function App() {
     setGroups(next);
     saveGroups(next);
     setTimeout(() => newEntries.forEach(e => {
-      runCheck(activeGroupId, e.id, e.url);
+      runCheck(activeGroupId, e.id, e.url, e.monitoring);
       runSslCheck(activeGroupId, e.id, e.url, true);
     }), 50);
   };
@@ -902,13 +919,22 @@ export default function App() {
                       groupName={isAllView ? entry._groupName : null}
                       onRemove={() => removeUrl(gId, entry.id)}
                       onCheck={() => {
-                        runCheck(gId, entry.id, entry.url);
+                        runCheck(gId, entry.id, entry.url, entry.monitoring);
                         runSslCheck(gId, entry.id, entry.url, true);
                       }}
                       checking={checkingIds.has(entry.id)}
                       onUpdateCredentials={(creds) => updateCredentials(gId, entry.id, creds)}
                       onUpdateUrl={(newUrl) => updateUrl(gId, entry.id, newUrl)}
                       onTogglePause={() => togglePauseUrl(gId, entry.id)}
+                      onUpdateMonitoring={(mon) => {
+                        setGroups(gs => gs.map(g => g.id !== gId ? g : {
+                          ...g, urls: g.urls.map(u => u.id !== entry.id ? u : { ...u, monitoring: { ...u.monitoring, ...mon } }),
+                        }));
+                        const updated = groups.map(g => g.id !== gId ? g : {
+                          ...g, urls: g.urls.map(u => u.id !== entry.id ? u : { ...u, monitoring: { ...u.monitoring, ...mon } }),
+                        });
+                        saveGroups(updated);
+                      }}
                     />
                   </div>
                 );

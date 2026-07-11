@@ -356,6 +356,8 @@ export default function TodoList({ servers = [], allUrls = [] }) {
   const handleAdd    = (todo)      => setTodos(prev => { const n = [...prev, todo]; saveTodos(n); return n; });
 
   const activeTodos = todos.filter(t => t.status !== "done");
+  const todoTodos   = todos.filter(t => t.status === "todo");
+  const progTodos   = todos.filter(t => t.status === "in_progress");
   const doneTodos   = todos.filter(t => t.status === "done");
 
   const VIEWS = [
@@ -376,9 +378,10 @@ export default function TodoList({ servers = [], allUrls = [] }) {
         {/* Compteurs */}
         <div style={{ display: "flex", gap: 8 }}>
           {[
-            { label: "Total",     value: todos.length,     color: "#818CF8" },
-            { label: "En cours",  value: activeTodos.length, color: "#FBBF24" },
-            { label: "Terminées", value: doneTodos.length, color: "#34D399" },
+            { label: "À faire",   value: todoTodos.length,  color: "#F87171" },
+            { label: "En cours",  value: progTodos.length,  color: "#FBBF24" },
+            { label: "Terminées", value: doneTodos.length,  color: "#34D399" },
+            { label: "Total",     value: todos.length,      color: "#818CF8" },
           ].map(s => (
             <div key={s.label} style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.07)", borderRadius: 10, padding: "8px 14px" }}>
               <div style={{ fontSize: 9, color: "#4B5563", marginBottom: 2 }}>{s.label}</div>

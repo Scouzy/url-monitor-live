@@ -14,6 +14,17 @@ export function makeEntry(url) {
     status: null,
     credentials: { login: "", password: "", previewUrl: "" },
     sslInfo: null,
+    monitoring: {
+      mode: "simple",          /* "simple" | "authenticated" */
+      authUrl: "",             /* page de login */
+      loginField: "username",  /* sélecteur CSS ou name du champ login */
+      passwordField: "password",
+      login: "",
+      password: "",
+      homeUrl: "",             /* page d'accueil après login */
+      tabUrl: "",              /* onglet à vérifier */
+      steps: [],               /* résultats de la dernière exécution */
+    },
   };
 }
 
@@ -27,6 +38,10 @@ function deserializeGroups(parsed) {
     urls: (g.urls || []).map(u => ({
       ...u,
       lastCheck: u.lastCheck ? new Date(u.lastCheck) : null,
+      monitoring: u.monitoring || {
+        mode: "simple", authUrl: "", loginField: "username", passwordField: "password",
+        login: "", password: "", homeUrl: "", tabUrl: "", steps: [],
+      },
     })),
   }));
 }

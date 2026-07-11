@@ -2,6 +2,7 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import "./index.css";
 import App from "./App.jsx";
+import ErrorBoundary from "./components/ErrorBoundary";
 
 /* Polyfill crypto.randomUUID pour les navigateurs mobiles qui ne le supportent pas */
 try {
@@ -16,8 +17,18 @@ try {
   }
 } catch {}
 
+/* Capturer les erreurs non gérées pour éviter page blanche sur mobile */
+window.addEventListener("error", (e) => {
+  console.error("[Global Error]", e.error || e.message);
+});
+window.addEventListener("unhandledrejection", (e) => {
+  console.error("[Unhandled Promise]", e.reason);
+});
+
 createRoot(document.getElementById("root")).render(
   <StrictMode>
-    <App />
+    <ErrorBoundary>
+      <App />
+    </ErrorBoundary>
   </StrictMode>
 );
