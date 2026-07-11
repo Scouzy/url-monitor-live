@@ -3,13 +3,18 @@ import {
   Cpu, MemoryStick, HardDrive, TrendingUp, AlertTriangle,
   Layers, Eye, Flame, Trophy, Lightbulb, AppWindow,
   X, CheckCircle, ClipboardList, GitBranch, Network, Activity,
+  Database, Server, Zap, ArrowUpCircle, ArrowDownCircle, Gauge,
 } from "lucide-react";
 import {
   ResponsiveContainer, ComposedChart, Line, XAxis, YAxis, Tooltip,
-  CartesianGrid, ReferenceLine, Area,
+  CartesianGrid, ReferenceLine, Area, BarChart, Bar, Legend,
 } from "recharts";
 import { getServers, subscribeServers, fleetTrend, distribution, topConsumers, recommendations, gaugeColor, ROLES } from "../utils/servers";
 import { loadSnapshots } from "../utils/snapshots";
+import {
+  monthlyResourceHistory, resourceEvents, serverResourceTimeline,
+  fleetResourceSummary, fleetResourceEvolution, serverGrowthRates,
+} from "../utils/resourceHistory";
 import { ServerDetail } from "./ServersView";
 import { loadImpacts } from "../utils/appImpactStorage";
 import { makeTodo, loadTodos, saveTodos } from "../utils/todoStorage";
@@ -197,6 +202,7 @@ export default function CapacityPlanning({ servers: propServers }) {
   const [selectedServerId, setSelectedServerId] = useState(null);
   const selectedServer = selectedServerId ? servers.find(s => s.id === selectedServerId) : null;
   const [actionReco, setActionReco] = useState(null);
+  const [resourceServer, setResourceServer] = useState(null);
   const isAll = metric === "all";
   const meta = METRICS.find(m => m.id === metric) ?? { id: "all", label: "Vue globale", color: "#9CA3AF" };
 
@@ -205,6 +211,13 @@ export default function CapacityPlanning({ servers: propServers }) {
   const top5  = isAll ? [] : topConsumers(servers, metric);
   const recos = recommendations(servers);
   const maxDist = isAll ? 1 : Math.max(...dist.map(d => d.count), 1);
+
+  /* ── Données historique ressources ── */
+  const fleetSummary = useMemo(() => fleetResourceSummary(servers), [servers]);
+  const fleetEvo     = useMemo(() => fleetResourceEvolution(snapshots), [snapshots]);
+  const resEvents    = useMemo(() => resourceEvents(snapshots), [snapshots]);
+  const growthRates  = useMemo(() => serverGrowthRates(snapshots), [snapshots]);
+  const serverTimeline = useMemo(() => resourceServer ? serverResourceTimeline(resourceServer, snapshots) : null, [resourceServer, snapshots]);
 
   /* Mois de franchissement du seuil pour la flotte */
   const breach = isAll ? null : trend.find(t => (t.projection ?? 0) >= 90);
@@ -227,6 +240,73 @@ export default function CapacityPlanning({ servers: propServers }) {
           </div>
         );
       })()}
+
+      {/* ══ CAPACITÉ TOTALE DE LA FLOTTE ══ */}
+      <div style={card}>
+        {cardTitle(Gauge, "Capacité totale de la flotte",
+          <span style={{ fontSize: 10, color: "#6B7280" }}>{fleetSummary.perServer.filter(s => s.cores || s.ramGb || s.diskGb).length} serveurs avec specs</span>
+        )}
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 14 }}>
+          {/* Total CPU cores */}
+          <div style={{ background: "rgba(99,102,241,0.06)", border: "1px solid rgba(99,102,241,0.2)", borderRadius: 12, padding: 14 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+              <Cpu size={16} color="#818CF8" />
+              <span style={{ fontSize: 11, fontWeight: 600, color: "#9CA3AF" }}>CPU total</span>
+            </div>
+            <div style={{ fontSize: 28, fontWeight: 800, color: "#818CF8", fontFamily: "'JetBrains Mono', monospace" }}>
+              {fleetSummary.totalCores || "—"}
+            </div>
+            <div style={{ fontSize: 10, color: "#4B5563", marginTop: 2 }}>cœurs alloués</div>
+          </div>
+          {/* Total RAM */}
+          <div style={{ background: "rgba(236,72,153,0.06)", border: "1px solid rgba(236,72,153,0.2)", borderRadius: 12, padding: 14 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+              <MemoryStick size={16} color="#EC4899" />
+              <span style={{ fontSize: 11, fontWeight: 600, color: "#9CA3AF" }}>RAM totale</span>
+            </div>
+            <div style={{ fontSize: 28, fontWeight: 800, color: "#EC4899", fontFamily: "'JetBrains Mono', monospace" }}>
+              {fleetSummary.totalRamGb || "—"}<span style={{ fontSize: 14, opacity: 0.6 }}> Go</span>
+            </div>
+            <div style={{ fontSize: 10, color: "#4B5563", marginTop: 2 }}>
+              {fleetSummary.usedRamGb != null && `${fleetSummary.usedRamGb} Go utilisés · ${fleetSummary.headroomRamGb} Go libres`}
+            </div>
+          </div>
+          {/* Total Disk */}
+          <div style={{ background: "rgba(251,191,36,0.06)", border: "1px solid rgba(251,191,36,0.2)", borderRadius: 12, padding: 14 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+              <HardDrive size={16} color="#FBBF24" />
+              <span style={{ fontSize: 11, fontWeight: 600, color: "#9CA3AF" }}>Disque total</span>
+            </div>
+            <div style={{ fontSize: 28, fontWeight: 800, color: "#FBBF24", fontFamily: "'JetBrains Mono', monospace" }}>
+              {fleetSummary.totalDiskGb || "—"}<span style={{ fontSize: 14, opacity: 0.6 }}> Go</span>
+            </div>
+            <div style={{ fontSize: 10, color: "#4B5563", marginTop: 2 }}>
+              {fleetSummary.usedDiskGb != null && `${fleetSummary.usedDiskGb} Go utilisés · ${fleetSummary.headroomDiskGb} Go libres`}
+            </div>
+          </div>
+          {/* Efficiency */}
+          <div style={{ background: "rgba(52,211,153,0.06)", border: "1px solid rgba(52,211,153,0.2)", borderRadius: 12, padding: 14 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+              <Activity size={16} color="#34D399" />
+              <span style={{ fontSize: 11, fontWeight: 600, color: "#9CA3AF" }}>Efficacité</span>
+            </div>
+            <div style={{ display: "flex", gap: 16 }}>
+              <div>
+                <div style={{ fontSize: 20, fontWeight: 800, color: "#EC4899", fontFamily: "'JetBrains Mono', monospace" }}>
+                  {fleetSummary.efficiencyRam != null ? `${fleetSummary.efficiencyRam}%` : "—"}
+                </div>
+                <div style={{ fontSize: 9, color: "#4B5563" }}>RAM</div>
+              </div>
+              <div>
+                <div style={{ fontSize: 20, fontWeight: 800, color: "#FBBF24", fontFamily: "'JetBrains Mono', monospace" }}>
+                  {fleetSummary.efficiencyDisk != null ? `${fleetSummary.efficiencyDisk}%` : "—"}
+                </div>
+                <div style={{ fontSize: 9, color: "#4B5563" }}>Disque</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
 
       {/* Switch métrique */}
       <div style={{ display: "flex", gap: 8 }}>
@@ -538,6 +618,191 @@ export default function CapacityPlanning({ servers: propServers }) {
           </div>
         )}
       </div>
+
+      {/* ══ ÉVOLUTION DES RESSOURCES FLOTTE (12 mois+) ══ */}
+      {fleetEvo.length >= 2 && (
+        <div style={card}>
+          {cardTitle(TrendingUp, "Évolution des ressources de la flotte",
+            <span style={{ fontSize: 10, color: "#6B7280" }}>{fleetEvo.length} mois d'historique</span>
+          )}
+          <div style={{ height: 220 }}>
+            <ResponsiveContainer width="100%" height="100%">
+              <ComposedChart data={fleetEvo} margin={{ top: 6, right: 12, bottom: 0, left: -8 }}>
+                <CartesianGrid stroke="rgba(255,255,255,0.05)" vertical={false} />
+                <XAxis dataKey="label" tick={{ fontSize: 9, fill: "#6B7280" }} axisLine={false} tickLine={false} />
+                <YAxis yAxisId="left" tick={{ fontSize: 9, fill: "#6B7280" }} axisLine={false} tickLine={false} />
+                <YAxis yAxisId="right" orientation="right" tick={{ fontSize: 9, fill: "#6B7280" }} axisLine={false} tickLine={false} />
+                <Tooltip
+                  contentStyle={{ background: "#1F2937", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8, fontSize: 11 }}
+                  labelStyle={{ color: "#9CA3AF" }}
+                  formatter={(v, name) => {
+                    if (v == null) return ["—", name];
+                    if (name === "Serveurs") return [v, name];
+                    return [`${v} Go`, name];
+                  }}
+                />
+                <Legend wrapperStyle={{ fontSize: 10 }} />
+                <Bar yAxisId="right" dataKey="serverCount" name="Serveurs" fill="rgba(156,163,175,0.2)" radius={[4, 4, 0, 0]} />
+                <Line yAxisId="left" type="monotone" dataKey="totalRamGb" name="RAM Go" stroke="#EC4899" strokeWidth={2.5} dot={{ r: 3, fill: "#EC4899" }} />
+                <Line yAxisId="left" type="monotone" dataKey="totalDiskGb" name="Disque Go" stroke="#FBBF24" strokeWidth={2.5} dot={{ r: 3, fill: "#FBBF24" }} />
+                <Line yAxisId="right" type="monotone" dataKey="totalCores" name="CPU cœurs" stroke="#818CF8" strokeWidth={2} strokeDasharray="5 3" dot={{ r: 2, fill: "#818CF8" }} />
+              </ComposedChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+      )}
+
+      {/* ══ ÉVOLUTION RESSOURCES PAR SERVEUR ══ */}
+      <div style={card}>
+        {cardTitle(Server, "Évolution des ressources par serveur",
+          <select
+            value={resourceServer || ""}
+            onChange={e => setResourceServer(e.target.value || null)}
+            style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8, color: "#E5E7EB", fontSize: 11, padding: "5px 10px", cursor: "pointer" }}
+          >
+            <option value="" style={{ background: "#1F2937", color: "#6B7280" }}>Sélectionner un serveur…</option>
+            {servers.filter(s => s.cores || s.ramGb || s.diskGb).map(s => (
+              <option key={s.id} value={s.name} style={{ background: "#1F2937", color: "#E5E7EB" }}>{s.name}</option>
+            ))}
+          </select>
+        )}
+        {resourceServer && serverTimeline && serverTimeline.length >= 2 ? (
+          <>
+            <div style={{ height: 200 }}>
+              <ResponsiveContainer width="100%" height="100%">
+                <ComposedChart data={serverTimeline} margin={{ top: 6, right: 12, bottom: 0, left: -8 }}>
+                  <CartesianGrid stroke="rgba(255,255,255,0.05)" vertical={false} />
+                  <XAxis dataKey="label" tick={{ fontSize: 9, fill: "#6B7280" }} axisLine={false} tickLine={false} />
+                  <YAxis yAxisId="left" tick={{ fontSize: 9, fill: "#6B7280" }} axisLine={false} tickLine={false} />
+                  <YAxis yAxisId="right" orientation="right" tick={{ fontSize: 9, fill: "#6B7280" }} axisLine={false} tickLine={false} />
+                  <Tooltip
+                    contentStyle={{ background: "#1F2937", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8, fontSize: 11 }}
+                    labelStyle={{ color: "#9CA3AF" }}
+                    formatter={(v, name) => v == null ? ["—", name] : [name.includes("cœurs") ? v : `${v} Go`, name]}
+                  />
+                  <Legend wrapperStyle={{ fontSize: 10 }} />
+                  <Line yAxisId="left" type="stepAfter" dataKey="ramGb" name="RAM Go" stroke="#EC4899" strokeWidth={2.5} dot={{ r: 3, fill: "#EC4899" }} />
+                  <Line yAxisId="left" type="stepAfter" dataKey="diskGb" name="Disque Go" stroke="#FBBF24" strokeWidth={2.5} dot={{ r: 3, fill: "#FBBF24" }} />
+                  <Line yAxisId="right" type="stepAfter" dataKey="cores" name="CPU cœurs" stroke="#818CF8" strokeWidth={2} strokeDasharray="5 3" dot={{ r: 2, fill: "#818CF8" }} />
+                </ComposedChart>
+              </ResponsiveContainer>
+            </div>
+            {/* Tableau détaillé mois par mois */}
+            <div style={{ marginTop: 12, maxHeight: 240, overflowY: "auto" }}>
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11 }}>
+                <thead>
+                  <tr style={{ position: "sticky", top: 0, background: "#0B0F19", zIndex: 1 }}>
+                    <th style={{ textAlign: "left", padding: "6px 10px", color: "#6B7280", fontWeight: 600, borderBottom: "1px solid rgba(255,255,255,0.06)" }}>Mois</th>
+                    <th style={{ textAlign: "right", padding: "6px 10px", color: "#818CF8", fontWeight: 600, borderBottom: "1px solid rgba(255,255,255,0.06)" }}>Cœurs</th>
+                    <th style={{ textAlign: "right", padding: "6px 10px", color: "#EC4899", fontWeight: 600, borderBottom: "1px solid rgba(255,255,255,0.06)" }}>RAM Go</th>
+                    <th style={{ textAlign: "right", padding: "6px 10px", color: "#FBBF24", fontWeight: 600, borderBottom: "1px solid rgba(255,255,255,0.06)" }}>Disque Go</th>
+                    <th style={{ textAlign: "right", padding: "6px 10px", color: "#6B7280", fontWeight: 600, borderBottom: "1px solid rgba(255,255,255,0.06)" }}>CPU %</th>
+                    <th style={{ textAlign: "right", padding: "6px 10px", color: "#6B7280", fontWeight: 600, borderBottom: "1px solid rgba(255,255,255,0.06)" }}>RAM %</th>
+                    <th style={{ textAlign: "right", padding: "6px 10px", color: "#6B7280", fontWeight: 600, borderBottom: "1px solid rgba(255,255,255,0.06)" }}>Disk %</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {serverTimeline.map((row, i) => {
+                    const prev = i > 0 ? serverTimeline[i - 1] : null;
+                    const changed = prev && (prev.cores !== row.cores || prev.ramGb !== row.ramGb || prev.diskGb !== row.diskGb);
+                    return (
+                      <tr key={i} style={{ background: changed ? "rgba(99,102,241,0.06)" : "transparent" }}>
+                        <td style={{ padding: "5px 10px", color: "#E5E7EB", fontWeight: changed ? 700 : 400 }}>{row.label}{changed && " ✦"}</td>
+                        <td style={{ textAlign: "right", padding: "5px 10px", color: "#818CF8", fontFamily: "'JetBrains Mono', monospace" }}>{row.cores ?? "—"}</td>
+                        <td style={{ textAlign: "right", padding: "5px 10px", color: "#EC4899", fontFamily: "'JetBrains Mono', monospace" }}>{row.ramGb ?? "—"}</td>
+                        <td style={{ textAlign: "right", padding: "5px 10px", color: "#FBBF24", fontFamily: "'JetBrains Mono', monospace" }}>{row.diskGb ?? "—"}</td>
+                        <td style={{ textAlign: "right", padding: "5px 10px", color: "#6B7280", fontFamily: "'JetBrains Mono', monospace" }}>{row.cpu != null ? `${row.cpu}%` : "—"}</td>
+                        <td style={{ textAlign: "right", padding: "5px 10px", color: "#6B7280", fontFamily: "'JetBrains Mono', monospace" }}>{row.ram != null ? `${row.ram}%` : "—"}</td>
+                        <td style={{ textAlign: "right", padding: "5px 10px", color: "#6B7280", fontFamily: "'JetBrains Mono', monospace" }}>{row.disk != null ? `${row.disk}%` : "—"}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </>
+        ) : resourceServer ? (
+          <div style={{ padding: "20px 0", textAlign: "center", fontSize: 12, color: "#6B7280" }}>
+            Pas assez de snapshots pour ce serveur (minimum 2 mois requis)
+          </div>
+        ) : (
+          <div style={{ padding: "20px 0", textAlign: "center", fontSize: 12, color: "#6B7280" }}>
+            Sélectionnez un serveur pour voir l'évolution de ses ressources mois par mois
+          </div>
+        )}
+      </div>
+
+      {/* ══ TIMELINE DES AJOUTS DE RESSOURCES ══ */}
+      {resEvents.length > 0 && (
+        <div style={card}>
+          {cardTitle(Zap, "Timeline des ajouts de ressources",
+            <span style={{ fontSize: 10, color: "#6B7280" }}>{resEvents.length} événement(s)</span>
+          )}
+          <div style={{ maxHeight: 300, overflowY: "auto", display: "flex", flexDirection: "column", gap: 6 }}>
+            {resEvents.map((ev, i) => (
+              <div key={i} style={{
+                display: "flex", alignItems: "center", gap: 10, padding: "8px 12px", borderRadius: 10,
+                background: ev.type === "add" ? "rgba(52,211,153,0.06)" : "rgba(248,113,113,0.06)",
+                border: `1px solid ${ev.type === "add" ? "rgba(52,211,153,0.2)" : "rgba(248,113,113,0.2)"}`,
+              }}>
+                {ev.type === "add" ? <ArrowUpCircle size={14} color="#34D399" /> : <ArrowDownCircle size={14} color="#F87171" />}
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <span style={{ fontSize: 12, fontWeight: 600, color: "#E5E7EB" }}>{ev.server}</span>
+                  <span style={{ fontSize: 11, color: "#9CA3AF", marginLeft: 8 }}>
+                    {ev.fieldLabel} : {ev.oldValue}{ev.unit} → {ev.newValue}{ev.unit}
+                  </span>
+                </div>
+                <span style={{
+                  fontSize: 10, fontWeight: 700, padding: "2px 8px", borderRadius: 8, flexShrink: 0,
+                  background: ev.type === "add" ? "rgba(52,211,153,0.15)" : "rgba(248,113,113,0.15)",
+                  color: ev.type === "add" ? "#34D399" : "#F87171",
+                }}>
+                  {ev.delta > 0 ? "+" : ""}{ev.delta}{ev.unit}
+                </span>
+                <span style={{ fontSize: 10, color: "#4B5563", flexShrink: 0 }}>{ev.label}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* ══ TAUX DE CROISSANCE PAR SERVEUR ══ */}
+      {growthRates.length > 0 && (
+        <div style={card}>
+          {cardTitle(Activity, "Taux de croissance par serveur",
+            <span style={{ fontSize: 10, color: "#6B7280" }}>Basé sur snapshots réels</span>
+          )}
+          <div style={{ maxHeight: 280, overflowY: "auto" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11 }}>
+              <thead>
+                <tr style={{ position: "sticky", top: 0, background: "#0B0F19", zIndex: 1 }}>
+                  <th style={{ textAlign: "left", padding: "6px 10px", color: "#6B7280", fontWeight: 600, borderBottom: "1px solid rgba(255,255,255,0.06)" }}>Serveur</th>
+                  <th style={{ textAlign: "right", padding: "6px 10px", color: "#6B7280", fontWeight: 600, borderBottom: "1px solid rgba(255,255,255,0.06)" }}>Mois suivis</th>
+                  <th style={{ textAlign: "right", padding: "6px 10px", color: "#818CF8", fontWeight: 600, borderBottom: "1px solid rgba(255,255,255,0.06)" }}>CPU %/mois</th>
+                  <th style={{ textAlign: "right", padding: "6px 10px", color: "#EC4899", fontWeight: 600, borderBottom: "1px solid rgba(255,255,255,0.06)" }}>RAM %/mois</th>
+                  <th style={{ textAlign: "right", padding: "6px 10px", color: "#FBBF24", fontWeight: 600, borderBottom: "1px solid rgba(255,255,255,0.06)" }}>Disk %/mois</th>
+                  <th style={{ textAlign: "right", padding: "6px 10px", color: "#EC4899", fontWeight: 600, borderBottom: "1px solid rgba(255,255,255,0.06)" }}>RAM Go/mois</th>
+                  <th style={{ textAlign: "right", padding: "6px 10px", color: "#FBBF24", fontWeight: 600, borderBottom: "1px solid rgba(255,255,255,0.06)" }}>Disk Go/mois</th>
+                </tr>
+              </thead>
+              <tbody>
+                {growthRates.map(g => (
+                  <tr key={g.name}>
+                    <td style={{ padding: "5px 10px", color: "#E5E7EB", fontWeight: 600 }}>{g.name}</td>
+                    <td style={{ textAlign: "right", padding: "5px 10px", color: "#6B7280", fontFamily: "'JetBrains Mono', monospace" }}>{g.monthsTracked}</td>
+                    <td style={{ textAlign: "right", padding: "5px 10px", color: "#818CF8", fontFamily: "'JetBrains Mono', monospace" }}>{g.cpuGrowth != null ? `${g.cpuGrowth > 0 ? "+" : ""}${g.cpuGrowth}%` : "—"}</td>
+                    <td style={{ textAlign: "right", padding: "5px 10px", color: "#EC4899", fontFamily: "'JetBrains Mono', monospace" }}>{g.ramGrowth != null ? `${g.ramGrowth > 0 ? "+" : ""}${g.ramGrowth}%` : "—"}</td>
+                    <td style={{ textAlign: "right", padding: "5px 10px", color: "#FBBF24", fontFamily: "'JetBrains Mono', monospace" }}>{g.diskGrowth != null ? `${g.diskGrowth > 0 ? "+" : ""}${g.diskGrowth}%` : "—"}</td>
+                    <td style={{ textAlign: "right", padding: "5px 10px", color: "#EC4899", fontFamily: "'JetBrains Mono', monospace" }}>{g.ramGbGrowth != null ? `${g.ramGbGrowth > 0 ? "+" : ""}${g.ramGbGrowth}%` : "—"}</td>
+                    <td style={{ textAlign: "right", padding: "5px 10px", color: "#FBBF24", fontFamily: "'JetBrains Mono', monospace" }}>{g.diskGbGrowth != null ? `${g.diskGbGrowth > 0 ? "+" : ""}${g.diskGbGrowth}%` : "—"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
       {/* ── Modal Plan d'action ── */}
       {actionReco && <PlanActionModal reco={actionReco} servers={servers} onClose={() => setActionReco(null)} />}
 

@@ -1,7 +1,7 @@
 import { useState, useMemo, useEffect, useCallback } from "react";
 import {
   ResponsiveContainer, Area, Line, XAxis, YAxis, Tooltip, CartesianGrid,
-  ComposedChart, ReferenceLine,
+  ComposedChart, ReferenceLine, Brush,
 } from "recharts";
 import {
   ArrowLeft, Server, Cpu, MemoryStick, HardDrive, Network, MonitorCog,
@@ -68,9 +68,9 @@ function KpiCard({ icon: Icon, label, value, color, history }) {
   );
 }
 
-/* ── Graphique métriques avec toggle 24h/1 mois + isolation métriques ── */
+/* ── Graphique métriques avec toggle 24h/1m/3m/6m + isolation métriques + scrollbar ── */
 function MetricsChart({ server, isMobile }) {
-  const [range, setRange] = useState("24h"); /* "24h" | "1m" */
+  const [range, setRange] = useState("24h"); /* "24h" | "1m" | "3m" | "6m" */
   const [visible, setVisible] = useState({ cpu: true, ram: true, disk: true });
   const [liveTime, setLiveTime] = useState(() => new Date().toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" }));
 
@@ -92,23 +92,46 @@ function MetricsChart({ server, isMobile }) {
     }));
   }, [server.history24h]);
 
-  /* Données 1 mois : snapshots de capacité filtrés pour ce serveur */
-  const data1m = useMemo(() => {
+  /* Données historique : snapshots filtrés par plage temporelle */
+  const dataHistory = useMemo(() => {
+    if (range === "24h") return [];
+    const now = Date.now();
+    const daysMap = { "1m": 30, "3m": 90, "6m": 180 };
+    const cutoff = now - (daysMap[range] || 30) * 86400000;
+
     const pts = snapshots
-      .filter(s => s.servers[server.name] != null)
+      .filter(s => s.servers[server.name] != null && s.ts >= cutoff)
       .map(s => ({
         ts: s.ts,
         time: new Date(s.ts).toLocaleDateString("fr-FR", { day: "2-digit", month: "short" }),
+        fullDate: new Date(s.ts).toLocaleDateString("fr-FR", { day: "2-digit", month: "short", year: "numeric" }),
         CPU: s.servers[server.name].cpu,
         RAM: s.servers[server.name].ram,
         Disque: s.servers[server.name].disk,
       }))
       .sort((a, b) => a.ts - b.ts);
-    return pts;
-  }, [server.name, snapshots]);
 
-  const chartData = range === "24h" ? data24h : data1m;
+    /* Si pas assez de points dans la plage, élargir à tous les snapshots disponibles */
+    if (pts.length < 2) {
+      const all = snapshots
+        .filter(s => s.servers[server.name] != null)
+        .map(s => ({
+          ts: s.ts,
+          time: new Date(s.ts).toLocaleDateString("fr-FR", { day: "2-digit", month: "short" }),
+          fullDate: new Date(s.ts).toLocaleDateString("fr-FR", { day: "2-digit", month: "short", year: "numeric" }),
+          CPU: s.servers[server.name].cpu,
+          RAM: s.servers[server.name].ram,
+          Disque: s.servers[server.name].disk,
+        }))
+        .sort((a, b) => a.ts - b.ts);
+      return all;
+    }
+    return pts;
+  }, [server.name, snapshots, range]);
+
+  const chartData = range === "24h" ? data24h : dataHistory;
   const hasData = chartData.length > 0;
+  const showBrush = range !== "24h" && chartData.length > 5;
 
   const toggleMetric = (key) => setVisible(v => ({ ...v, [key]: !v[key] }));
 
@@ -117,6 +140,15 @@ function MetricsChart({ server, isMobile }) {
     { key: "ram", label: "RAM", color: "#F472B6" },
     { key: "disk", label: "Disque", color: "#FBBF24" },
   ];
+
+  const rangeOptions = [
+    { id: "24h", label: "Live" },
+    { id: "1m", label: "1 mois" },
+    { id: "3m", label: "3 mois" },
+    { id: "6m", label: "6 mois" },
+  ];
+
+  const rangeLabel = range === "24h" ? "temps réel" : `historique — ${rangeOptions.find(r => r.id === range)?.label || range}`;
 
   return (
     <div style={{
@@ -128,7 +160,7 @@ function MetricsChart({ server, isMobile }) {
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <Activity size={15} color="#818CF8" />
           <h3 style={{ fontSize: 13, fontWeight: 700, color: "#E5E7EB", margin: 0 }}>
-            Métriques {range === "24h" ? "temps réel" : "historique — 1 mois"}
+            Métriques {rangeLabel}
           </h3>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
@@ -138,15 +170,18 @@ function MetricsChart({ server, isMobile }) {
               {liveTime}
             </div>
           )}
-          {/* Toggle 24h / 1 mois */}
+          {range !== "24h" && chartData.length > 0 && (
+            <span style={{ fontSize: 10, color: "#6B7280" }}>{chartData.length} points</span>
+          )}
+          {/* Toggle 24h / 1m / 3m / 6m */}
           <div style={{ display: "flex", background: "rgba(255,255,255,0.04)", borderRadius: 8, padding: 2 }}>
-            {["24h", "1m"].map(r => (
-              <button key={r} onClick={() => setRange(r)} style={{
-                padding: "4px 12px", borderRadius: 6, border: "none", cursor: "pointer",
-                fontSize: 10, fontWeight: 700, transition: "all 0.15s",
-                background: range === r ? "rgba(99,102,241,0.25)" : "transparent",
-                color: range === r ? "#A5B4FC" : "#6B7280",
-              }}>{r === "1m" ? "1 mois" : "Live"}</button>
+            {rangeOptions.map(r => (
+              <button key={r.id} onClick={() => setRange(r.id)} style={{
+                padding: "4px 10px", borderRadius: 6, border: "none", cursor: "pointer",
+                fontSize: 10, fontWeight: 700, transition: "all 0.15s", whiteSpace: "nowrap",
+                background: range === r.id ? "rgba(99,102,241,0.25)" : "transparent",
+                color: range === r.id ? "#A5B4FC" : "#6B7280",
+              }}>{r.label}</button>
             ))}
           </div>
         </div>
@@ -170,9 +205,9 @@ function MetricsChart({ server, isMobile }) {
       </div>
 
       {hasData ? (
-        <div style={{ width: "100%", height: isMobile ? 280 : 340 }}>
+        <div style={{ width: "100%", height: isMobile ? 280 : showBrush ? 380 : 340 }}>
           <ResponsiveContainer width="100%" height="100%">
-            <ComposedChart data={chartData} margin={{ top: 8, right: 12, left: -8, bottom: 0 }}>
+            <ComposedChart data={chartData} margin={{ top: 8, right: 12, left: -8, bottom: showBrush ? 8 : 0 }}>
               <defs>
                 <linearGradient id="mCpu" x1="0" y1="0" x2="0" y2="1">
                   <stop offset="0%" stopColor="#818CF8" stopOpacity={0.3} />
@@ -188,14 +223,25 @@ function MetricsChart({ server, isMobile }) {
                 </linearGradient>
               </defs>
               <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.04)" />
-              <XAxis dataKey="time" tick={{ fill: "#6B7280", fontSize: 10 }} axisLine={{ stroke: "rgba(255,255,255,0.08)" }} interval={range === "24h" ? 2 : "preserveStartEnd"} />
+              <XAxis dataKey="time" tick={{ fill: "#6B7280", fontSize: 10 }} axisLine={{ stroke: "rgba(255,255,255,0.08)" }} interval={range === "24h" ? 2 : "preserveStartEnd"} minTickGap={20} />
               <YAxis domain={[0, 100]} tick={{ fill: "#6B7280", fontSize: 10 }} axisLine={{ stroke: "rgba(255,255,255,0.08)" }} unit="%" />
               <Tooltip content={<RealTimeTooltip />} />
               <ReferenceLine y={90} stroke="#F87171" strokeDasharray="5 4" strokeWidth={1}
                 label={{ value: "Seuil 90%", position: "insideTopRight", fill: "#F87171", fontSize: 9 }} />
-              {visible.cpu && <Area type="monotone" dataKey="CPU" stroke="#818CF8" strokeWidth={2} fill="url(#mCpu)" dot={false} />}
-              {visible.ram && <Area type="monotone" dataKey="RAM" stroke="#F472B6" strokeWidth={2} fill="url(#mRam)" dot={false} />}
-              {visible.disk && <Area type="monotone" dataKey="Disque" stroke="#FBBF24" strokeWidth={2} fill="url(#mDisk)" dot={false} />}
+              {visible.cpu && <Area type="monotone" dataKey="CPU" stroke="#818CF8" strokeWidth={2} fill="url(#mCpu)" dot={range !== "24h" ? { r: 3, fill: "#818CF8" } : false} />}
+              {visible.ram && <Area type="monotone" dataKey="RAM" stroke="#F472B6" strokeWidth={2} fill="url(#mRam)" dot={range !== "24h" ? { r: 3, fill: "#F472B6" } : false} />}
+              {visible.disk && <Area type="monotone" dataKey="Disque" stroke="#FBBF24" strokeWidth={2} fill="url(#mDisk)" dot={range !== "24h" ? { r: 3, fill: "#FBBF24" } : false} />}
+              {showBrush && (
+                <Brush
+                  dataKey="time"
+                  height={28}
+                  stroke="#818CF8"
+                  fill="rgba(99,102,241,0.08)"
+                  travellerWidth={8}
+                  startIndex={0}
+                  endIndex={chartData.length - 1}
+                />
+              )}
             </ComposedChart>
           </ResponsiveContainer>
         </div>
@@ -203,7 +249,7 @@ function MetricsChart({ server, isMobile }) {
         <div style={{ textAlign: "center", padding: 30, color: "#4B5563", fontSize: 12 }}>
           {range === "24h"
             ? "Aucune donnée 24h disponible."
-            : "Aucun snapshot sur 1 mois. Les snapshots s'accumulent à chaque chargement — revenez après plusieurs jours."}
+            : "Aucun snapshot sur cette période. Les snapshots s'accumulent à chaque chargement — revenez après plusieurs jours."}
         </div>
       )}
     </div>

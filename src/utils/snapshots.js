@@ -54,6 +54,7 @@ export function saveSnapshot(servers, source, label) {
         disk:   s.disk   ?? null,
         ramGb:  s.ramGb  ?? null,
         diskGb: s.diskGb ?? null,
+        cores:  s.cores  ?? null,
       }])
     ),
   };
