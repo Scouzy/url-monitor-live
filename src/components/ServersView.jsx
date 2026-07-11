@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect, useSyncExternalStore } from "react";
+import { useState, useMemo, useEffect, useSyncExternalStore, Fragment } from "react";
 import {
   Server, Search, X, Cpu, MemoryStick, HardDrive, Globe,
   Database, Boxes, Zap, Clock, Network, MonitorCog, Info, AppWindow,
@@ -7,7 +7,7 @@ import {
 } from "lucide-react";
 import {
   ResponsiveContainer, AreaChart, Area, XAxis, YAxis, Tooltip, CartesianGrid,
-  ComposedChart, Line, ReferenceLine,
+  ComposedChart, Line, ReferenceLine, Brush,
 } from "recharts";
 import { getServers, subscribeServers, ROLES, gaugeColor, removeServer, getAppFilter, setAppFilter, subscribeAppFilter } from "../utils/servers";
 import { loadSnapshots, lastDelta, buildTrendChartData } from "../utils/snapshots";
@@ -125,38 +125,143 @@ export function RoleBadge({ role }) {
   );
 }
 
-/* ── Courbe 24h d'une ressource ── */
-function ResourceChart({ data, dataKey, color, label }) {
+/* ── Graphiques ressources avec toggle 24h/1m/3m/6m + Brush scrollbar ── */
+function ResourceChartsWithHistory({ server, snapshots }) {
+  const [range, setRange] = useState("24h");
+  const [visible, setVisible] = useState({ cpu: true, ram: true, disk: true });
+
+  const data24h = useMemo(() => {
+    const h24 = server.history24h || [];
+    if (h24.length === 0) return [];
+    return h24.map(d => ({ time: d.h, cpu: d.cpu, ram: d.ram, disk: d.disk }));
+  }, [server.history24h]);
+
+  const dataHistory = useMemo(() => {
+    if (range === "24h") return [];
+    const now = Date.now();
+    const daysMap = { "1m": 30, "3m": 90, "6m": 180 };
+    const cutoff = now - (daysMap[range] || 30) * 86400000;
+    const pts = snapshots
+      .filter(s => s.servers[server.name] != null && s.ts >= cutoff)
+      .map(s => ({
+        ts: s.ts,
+        time: new Date(s.ts).toLocaleDateString("fr-FR", { day: "2-digit", month: "short" }),
+        cpu: s.servers[server.name].cpu,
+        ram: s.servers[server.name].ram,
+        disk: s.servers[server.name].disk,
+      }))
+      .sort((a, b) => a.ts - b.ts);
+    if (pts.length < 2) {
+      return snapshots
+        .filter(s => s.servers[server.name] != null)
+        .map(s => ({
+          ts: s.ts,
+          time: new Date(s.ts).toLocaleDateString("fr-FR", { day: "2-digit", month: "short" }),
+          cpu: s.servers[server.name].cpu,
+          ram: s.servers[server.name].ram,
+          disk: s.servers[server.name].disk,
+        }))
+        .sort((a, b) => a.ts - b.ts);
+    }
+    return pts;
+  }, [server.name, snapshots, range]);
+
+  const chartData = range === "24h" ? data24h : dataHistory;
+  const hasData = chartData.length > 0;
+  const showBrush = range !== "24h" && chartData.length > 5;
+
+  const toggleMetric = (key) => setVisible(v => ({ ...v, [key]: !v[key] }));
+
+  const metrics = [
+    { key: "cpu",  label: "CPU",    color: "#818CF8" },
+    { key: "ram",  label: "RAM",    color: "#F472B6" },
+    { key: "disk", label: "Disque", color: "#FBBF24" },
+  ];
+
+  const rangeOptions = [
+    { id: "24h", label: "Live" },
+    { id: "1m",  label: "1m" },
+    { id: "3m",  label: "3m" },
+    { id: "6m",  label: "6m" },
+  ];
+
   return (
     <div style={{ marginBottom: 14 }}>
-      <div style={{ fontSize: 11, fontWeight: 600, color: "#9CA3AF", marginBottom: 6, display: "flex", justifyContent: "space-between" }}>
-        <span>{label} — temps réel</span>
-        <span style={{ color, fontFamily: "'JetBrains Mono', monospace" }}>
-          max {Math.max(...data.map(d => d[dataKey]))}%
+      {/* Header avec filtre */}
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+        <span style={{ fontSize: 11, fontWeight: 600, color: "#9CA3AF" }}>
+          Ressources {range === "24h" ? "temps réel" : `historique ${rangeOptions.find(r => r.id === range)?.label || ""}`}
         </span>
+        <div style={{ display: "flex", background: "rgba(255,255,255,0.04)", borderRadius: 7, padding: 2 }}>
+          {rangeOptions.map(r => (
+            <button key={r.id} onClick={() => setRange(r.id)} style={{
+              padding: "3px 8px", borderRadius: 5, border: "none", cursor: "pointer",
+              fontSize: 9, fontWeight: 700, transition: "all 0.15s", whiteSpace: "nowrap",
+              background: range === r.id ? "rgba(99,102,241,0.25)" : "transparent",
+              color: range === r.id ? "#A5B4FC" : "#6B7280",
+            }}>{r.label}</button>
+          ))}
+        </div>
       </div>
-      <div style={{ height: 90 }}>
-        <ResponsiveContainer width="100%" height="100%">
-          <AreaChart data={data} margin={{ top: 2, right: 4, bottom: 0, left: -32 }}>
-            <defs>
-              <linearGradient id={`grad-${dataKey}`} x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%" stopColor={color} stopOpacity={0.35} />
-                <stop offset="100%" stopColor={color} stopOpacity={0} />
-              </linearGradient>
-            </defs>
-            <CartesianGrid stroke="rgba(255,255,255,0.04)" vertical={false} />
-            <XAxis dataKey="h" tick={{ fontSize: 8, fill: "#4B5563" }} interval={3} axisLine={false} tickLine={false} />
-            <YAxis domain={[0, 100]} tick={{ fontSize: 8, fill: "#4B5563" }} axisLine={false} tickLine={false} />
-            <Tooltip
-              contentStyle={{ background: "#1F2937", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8, fontSize: 11 }}
-              labelStyle={{ color: "#9CA3AF" }}
-              formatter={(v) => [`${v}%`, label]}
-            />
-            <Area type="monotone" dataKey={dataKey} stroke={color} strokeWidth={1.5}
-              fill={`url(#grad-${dataKey})`} dot={false} />
-          </AreaChart>
-        </ResponsiveContainer>
+
+      {/* Boutons d'isolation des métriques */}
+      <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 8 }}>
+        {metrics.map(({ key, label, color }) => (
+          <button key={key} onClick={() => toggleMetric(key)} style={{
+            display: "inline-flex", alignItems: "center", gap: 4, padding: "3px 8px", borderRadius: 7,
+            border: `1px solid ${visible[key] ? `${color}40` : "rgba(255,255,255,0.06)"}`,
+            background: visible[key] ? `${color}15` : "transparent",
+            color: visible[key] ? color : "#4B5563",
+            fontSize: 9, fontWeight: 700, cursor: "pointer", transition: "all 0.15s",
+            userSelect: "none",
+          }}>
+            <span style={{ width: 7, height: 7, borderRadius: 2, background: visible[key] ? color : "#4B5563" }} />
+            {label}
+          </button>
+        ))}
       </div>
+
+      {hasData ? (
+        <div style={{ height: showBrush ? 200 : 160 }}>
+          <ResponsiveContainer width="100%" height="100%">
+            <ComposedChart data={chartData} margin={{ top: 2, right: 4, bottom: showBrush ? 8 : 0, left: -28 }}>
+              <defs>
+                <linearGradient id="rcCpu" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor="#818CF8" stopOpacity={0.3} />
+                  <stop offset="100%" stopColor="#818CF8" stopOpacity={0.02} />
+                </linearGradient>
+                <linearGradient id="rcRam" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor="#F472B6" stopOpacity={0.3} />
+                  <stop offset="100%" stopColor="#F472B6" stopOpacity={0.02} />
+                </linearGradient>
+                <linearGradient id="rcDisk" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor="#FBBF24" stopOpacity={0.3} />
+                  <stop offset="100%" stopColor="#FBBF24" stopOpacity={0.02} />
+                </linearGradient>
+              </defs>
+              <CartesianGrid stroke="rgba(255,255,255,0.04)" vertical={false} />
+              <XAxis dataKey="time" tick={{ fontSize: 8, fill: "#4B5563" }} interval={range === "24h" ? 3 : "preserveStartEnd"} minTickGap={15} axisLine={false} tickLine={false} />
+              <YAxis domain={[0, 100]} tick={{ fontSize: 8, fill: "#4B5563" }} axisLine={false} tickLine={false} unit="%" />
+              <Tooltip
+                contentStyle={{ background: "#1F2937", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8, fontSize: 10 }}
+                labelStyle={{ color: "#9CA3AF" }}
+                formatter={(v, name) => v == null ? ["—", name] : [`${v}%`, { cpu: "CPU", ram: "RAM", disk: "Disque" }[name] || name]}
+              />
+              <ReferenceLine y={90} stroke="#F87171" strokeDasharray="4 3" strokeWidth={0.8} />
+              {visible.cpu  && <Area type="monotone" dataKey="cpu"  stroke="#818CF8" strokeWidth={1.5} fill="url(#rcCpu)"  dot={range !== "24h" ? { r: 2, fill: "#818CF8" } : false} />}
+              {visible.ram  && <Area type="monotone" dataKey="ram"  stroke="#F472B6" strokeWidth={1.5} fill="url(#rcRam)"  dot={range !== "24h" ? { r: 2, fill: "#F472B6" } : false} />}
+              {visible.disk && <Area type="monotone" dataKey="disk" stroke="#FBBF24" strokeWidth={1.5} fill="url(#rcDisk)" dot={range !== "24h" ? { r: 2, fill: "#FBBF24" } : false} />}
+              {showBrush && (
+                <Brush dataKey="time" height={22} stroke="#818CF8" fill="rgba(99,102,241,0.08)" travellerWidth={8} startIndex={0} endIndex={chartData.length - 1} />
+              )}
+            </ComposedChart>
+          </ResponsiveContainer>
+        </div>
+      ) : (
+        <div style={{ textAlign: "center", padding: 20, color: "#4B5563", fontSize: 10 }}>
+          {range === "24h" ? "Aucune donnée 24h." : "Aucun snapshot sur cette période."}
+        </div>
+      )}
     </div>
   );
 }
@@ -200,6 +305,9 @@ function DeltaBadge({ delta }) {
 /* ── Tendance — données réelles (snapshots) ou simulées (fallback) ── */
 function ServerTrend({ server, snapshots }) {
   const [open, setOpen] = useState(true);
+  const [visible, setVisible] = useState({ cpu: true, ram: true, disk: true });
+
+  const toggleMetric = (key) => setVisible(v => ({ ...v, [key]: !v[key] }));
 
   /* Valeurs courantes du serveur (cohérentes avec les jauges et les graphiques 24h) */
   const cur = { cpu: server.cpu, ram: server.ram, disk: server.disk };
@@ -308,15 +416,25 @@ function ServerTrend({ server, snapshots }) {
 
       {open && (
         <>
-          {/* Légende */}
-          <div style={{ display: "flex", gap: 12, marginBottom: 6, flexWrap: "wrap" }}>
-            {TREND_LINES.map(({ color, label }) => (
-              <span key={label} style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 9, color: "#6B7280" }}>
-                <span style={{ width: 14, height: 2.5, background: color, borderRadius: 2, display: "inline-block" }} />
-                {label}
-              </span>
-            ))}
-            <span style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 9, color: "#6B7280" }}>
+          {/* Boutons d'isolation des métriques */}
+          <div style={{ display: "flex", gap: 6, marginBottom: 6, flexWrap: "wrap" }}>
+            {TREND_LINES.map(({ color, label, rKey }) => {
+              const key = rKey.replace("_r", "");
+              return (
+                <button key={label} onClick={() => toggleMetric(key)} style={{
+                  display: "inline-flex", alignItems: "center", gap: 4, padding: "3px 8px", borderRadius: 7,
+                  border: `1px solid ${visible[key] ? `${color}40` : "rgba(255,255,255,0.06)"}`,
+                  background: visible[key] ? `${color}15` : "transparent",
+                  color: visible[key] ? color : "#4B5563",
+                  fontSize: 9, fontWeight: 700, cursor: "pointer", transition: "all 0.15s",
+                  userSelect: "none",
+                }}>
+                  <span style={{ width: 7, height: 7, borderRadius: 2, background: visible[key] ? color : "#4B5563" }} />
+                  {label}
+                </button>
+              );
+            })}
+            <span style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 9, color: "#6B7280", marginLeft: 4 }}>
               <span style={{ width: 14, height: 0, borderTop: "2px dashed #6B7280", display: "inline-block" }} />
               Projection
             </span>
@@ -339,14 +457,18 @@ function ServerTrend({ server, snapshots }) {
                 />
                 <ReferenceLine y={90} stroke="#F87171" strokeDasharray="5 4" strokeWidth={1}
                   label={{ value: "90%", position: "insideTopRight", fill: "#F87171", fontSize: 8 }} />
-                {TREND_LINES.map(({ rKey, pKey, color }) => (
-                  <>
-                    <Line key={rKey} type="monotone" dataKey={rKey} stroke={color} strokeWidth={1.8}
-                      dot={{ r: snap ? 3 : 0, fill: color }} connectNulls={false} />
-                    <Line key={pKey} type="monotone" dataKey={pKey} stroke={color} strokeWidth={1.5}
-                      strokeDasharray="5 4" dot={false} connectNulls={false} />
-                  </>
-                ))}
+                {TREND_LINES.map(({ rKey, pKey, color }) => {
+                  const key = rKey.replace("_r", "");
+                  if (!visible[key]) return null;
+                  return (
+                    <Fragment key={rKey}>
+                      <Line type="monotone" dataKey={rKey} stroke={color} strokeWidth={1.8}
+                        dot={{ r: snap ? 3 : 0, fill: color }} connectNulls={false} />
+                      <Line type="monotone" dataKey={pKey} stroke={color} strokeWidth={1.5}
+                        strokeDasharray="5 4" dot={false} connectNulls={false} />
+                    </Fragment>
+                  );
+                })}
               </ComposedChart>
             </ResponsiveContainer>
           </div>
@@ -691,10 +813,8 @@ export function ServerDetail({ server, snapshots, onClose, width = 360, override
         <ServerGauge value={server.disk} label="Disque" />
       </div>
 
-      {/* Courbes 24h */}
-      <ResourceChart data={server.history24h} dataKey="cpu"  color="#818CF8" label="CPU" />
-      <ResourceChart data={server.history24h} dataKey="ram"  color="#F472B6" label="RAM" />
-      <ResourceChart data={server.history24h} dataKey="disk" color="#FBBF24" label="Disque" />
+      {/* Courbes ressources avec filtre 24h/1m/3m/6m */}
+      <ResourceChartsWithHistory server={server} snapshots={snapshots} />
 
       {/* Tendance */}
       <ServerTrend server={server} snapshots={snapshots} />

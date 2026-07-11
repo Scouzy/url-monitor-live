@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect, useCallback } from "react";
+import { useState, useMemo, useEffect, useCallback, Fragment } from "react";
 import {
   ResponsiveContainer, Area, Line, XAxis, YAxis, Tooltip, CartesianGrid,
   ComposedChart, ReferenceLine, Brush,
@@ -265,6 +265,9 @@ const TREND_LINES = [
 
 function TrendChart({ server, snapshots, isMobile }) {
   const [open, setOpen] = useState(true);
+  const [visible, setVisible] = useState({ cpu: true, ram: true, disk: true });
+
+  const toggleMetric = (key) => setVisible(v => ({ ...v, [key]: !v[key] }));
 
   const cur = { cpu: server.cpu, ram: server.ram, disk: server.disk };
   const growth = server.growthRate || 1.5;
@@ -356,15 +359,22 @@ function TrendChart({ server, snapshots, isMobile }) {
 
       {open && (
         <>
-          {/* Légende */}
-          <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
-            {TREND_LINES.map(({ color, label }) => (
-              <span key={label} style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 10, color: "#6B7280" }}>
-                <span style={{ width: 14, height: 2.5, background: color, borderRadius: 2, display: "inline-block" }} />
+          {/* Boutons d'isolation des métriques */}
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            {TREND_LINES.map(({ color, label, key }) => (
+              <button key={label} onClick={() => toggleMetric(key)} style={{
+                display: "inline-flex", alignItems: "center", gap: 5, padding: "4px 10px", borderRadius: 8,
+                border: `1px solid ${visible[key] ? `${color}40` : "rgba(255,255,255,0.06)"}`,
+                background: visible[key] ? `${color}15` : "transparent",
+                color: visible[key] ? color : "#4B5563",
+                fontSize: 10, fontWeight: 700, cursor: "pointer", transition: "all 0.15s",
+                userSelect: "none",
+              }}>
+                <span style={{ width: 8, height: 8, borderRadius: 2, background: visible[key] ? color : "#4B5563" }} />
                 {label}
-              </span>
+              </button>
             ))}
-            <span style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 10, color: "#6B7280" }}>
+            <span style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 10, color: "#6B7280", marginLeft: 4 }}>
               <span style={{ width: 14, height: 0, borderTop: "2px dashed #6B7280", display: "inline-block" }} />
               Projection
             </span>
@@ -387,14 +397,17 @@ function TrendChart({ server, snapshots, isMobile }) {
                 />
                 <ReferenceLine y={90} stroke="#F87171" strokeDasharray="5 4" strokeWidth={1}
                   label={{ value: "90%", position: "insideTopRight", fill: "#F87171", fontSize: 8 }} />
-                {TREND_LINES.map(({ rKey, pKey, color }) => (
-                  <Line key={rKey} type="monotone" dataKey={rKey} stroke={color} strokeWidth={1.8}
-                    dot={{ r: snap ? 3 : 0, fill: color }} connectNulls={false} />
-                ))}
-                {TREND_LINES.map(({ pKey, color }) => (
-                  <Line key={pKey} type="monotone" dataKey={pKey} stroke={color} strokeWidth={1.5}
-                    strokeDasharray="5 4" dot={false} connectNulls={false} />
-                ))}
+                {TREND_LINES.map(({ rKey, pKey, color, key }) => {
+                  if (!visible[key]) return null;
+                  return (
+                    <Fragment key={rKey}>
+                      <Line type="monotone" dataKey={rKey} stroke={color} strokeWidth={1.8}
+                        dot={{ r: snap ? 3 : 0, fill: color }} connectNulls={false} />
+                      <Line type="monotone" dataKey={pKey} stroke={color} strokeWidth={1.5}
+                        strokeDasharray="5 4" dot={false} connectNulls={false} />
+                    </Fragment>
+                  );
+                })}
               </ComposedChart>
             </ResponsiveContainer>
           </div>
