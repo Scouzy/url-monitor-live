@@ -1,0 +1,22 @@
+{
+  "name": "g1oeil-backend",
+  "version": "1.0.0",
+  "description": "Backend G1Oeil — gestion utilisateurs, URL monitoring, comparaison d'images, API management",
+  "type": "module",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js"
+  },
+  "dependencies": {
+    "better-sqlite3": "^11.3.0",
+    "express": "^4.21.0",
+    "jsonwebtoken": "^9.0.2",
+    "bcryptjs": "^2.4.3",
+    "multer": "^1.4.5-lts.1",
+    "pixelmatch": "^6.0.0",
+    "pngjs": "^7.0.0",
+    "playwright": "^1.61.1",
+    "cors": "^2.8.5"
+  }
+}

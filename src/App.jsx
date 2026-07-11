@@ -31,6 +31,8 @@ import { loadCapacitySettings, saveCapacitySettings } from "./utils/capacitySett
 import { loadTodos } from "./utils/todoStorage";
 import { clearSnapshots } from "./utils/snapshots";
 import { pushSync, pullSync, subscribeSyncStream } from "./utils/lanSync";
+import LoginPanel from "./components/LoginPanel";
+import { isLoggedIn as checkLoggedIn, verifyToken, logAppIncident, logItcareDisconnect, startHeartbeat } from "./utils/backendAuth";
 
 export default function App() {
   const [groups, setGroups] = useState(() => loadGroups() || getDefaultGroups());
@@ -104,6 +106,7 @@ export default function App() {
       if (json.message) setItcareError(json.message);
     } catch (err) {
       setItcareError(err.message);
+      logItcareDisconnect(err.message);
     } finally {
       setItcareLoading(false);
     }
@@ -381,6 +384,10 @@ export default function App() {
       /* Journal d'incidents */
       const grp = groupsRef.current.find(g => g.id === groupId);
       setIncidentLog(prev => addIncident(prev, { url: urlStr, groupName: grp?.name, type }));
+      /* Tracer l'indisponibilité dans le backend */
+      if (type === "offline") {
+        logAppIncident(urlStr, "URL down", `Groupe: ${grp?.name || "N/A"}`);
+      }
     }
     prevStatusRef.current[urlId] = result.isUp;
     setGroups(gs => gs.map(g => {
@@ -390,6 +397,11 @@ export default function App() {
           if (u.id !== urlId) return u;
           const newHistory = [...u.history, { ts: Date.now(), isUp: result.isUp, rt: result.responseTime }].slice(-MAX_HISTORY);
           const updated = { ...u, isUp: result.isUp, responseTime: result.responseTime, lastCheck: new Date(), history: newHistory, status: result.status };
+          if (result.error_code) {
+            updated.error_code = result.error_code;
+          } else {
+            delete updated.error_code;
+          }
           if (result.steps) {
             updated.monitoring = { ...u.monitoring, steps: result.steps };
           }
@@ -429,6 +441,17 @@ export default function App() {
   }, [runCheck, runSslCheck]);
 
   useEffect(() => { runAllChecks(); }, []);
+
+  /* ── Vérifier le token backend au démarrage ── */
+  useEffect(() => {
+    if (checkLoggedIn()) {
+      verifyToken();
+      startHeartbeat(() => ({
+        urlsCount: groupsRef.current?.reduce((acc, g) => acc + (g.urls?.length || 0), 0) || 0,
+        serversCount: 0,
+      }));
+    }
+  }, []);
 
   useEffect(() => {
     if (paused) { window.clearInterval(countdownRef.current); return; }
@@ -785,6 +808,7 @@ export default function App() {
                 {countdown}s
               </div>
             )}
+            <LoginPanel groups={groups} />
           </div>
         </header>
 

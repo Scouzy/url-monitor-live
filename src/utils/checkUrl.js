@@ -39,11 +39,14 @@ export async function checkMultiStep(monitoring) {
     if (data.error) {
       return { isUp: false, responseTime: elapsed, status: "Erreur", steps: [], error: data.error };
     }
+    /* Code 622 = changement visuel détecté par comparaison d'images */
+    const has622 = (data.steps || []).some(s => s.error_code === 622);
     return {
       isUp: data.ok,
       responseTime: elapsed,
-      status: data.ok ? "OK" : "Échec",
+      status: has622 ? "622" : (data.ok ? "OK" : "Échec"),
       steps: data.steps || [],
+      error_code: data.error_code || (has622 ? 622 : null),
     };
   } catch (e) {
     const elapsed = Math.round(performance.now() - start);

@@ -1,10 +1,11 @@
-import { Clock, CheckCircle, XCircle, AlertTriangle } from "lucide-react";
+import { Clock, CheckCircle, XCircle, AlertTriangle, Eye } from "lucide-react";
 
 export const STATUS = {
   PENDING: "pending",
   ONLINE: "online",
   OFFLINE: "offline",
   SLOW: "slow",
+  CHANGED: "changed",
 };
 
 export const SLOW_THRESHOLD = 2000;
@@ -39,10 +40,17 @@ export const STATUS_CONFIG = {
     label: "Lent",
     icon: AlertTriangle,
   },
+  [STATUS.CHANGED]: {
+    color: "#A78BFA",
+    bg: "rgba(167,139,250,0.12)",
+    label: "Changement détecté (622)",
+    icon: Eye,
+  },
 };
 
 export function getStatus(entry) {
   if (!entry.lastCheck) return STATUS.PENDING;
+  if (entry.status === "622" || entry.error_code === 622) return STATUS.CHANGED;
   if (!entry.isUp) return STATUS.OFFLINE;
   if (entry.responseTime > SLOW_THRESHOLD) return STATUS.SLOW;
   return STATUS.ONLINE;
