@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<browserconfig>
+  <msapplication>
+    <tile>
+      <square150x150logo src="/g1oeil-256.png"/>
+      <square310x310logo src="/g1oeil-512.png"/>
+      <TileColor>#0B0F19</TileColor>
+    </tile>
+  </msapplication>
+</browserconfig>

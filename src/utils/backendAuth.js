@@ -19,6 +19,42 @@ export function isLoggedIn() {
   return !!getAuthToken();
 }
 
+export function getUserRole() {
+  const user = getAuthUser();
+  return user?.role || null;
+}
+
+export function isSuperAdmin() {
+  return getUserRole() === "superadmin";
+}
+
+export function isAdmin() {
+  return getUserRole() === "admin";
+}
+
+export function canEdit() {
+  return isSuperAdmin() || isAdmin();
+}
+
+export function canDelete() {
+  return isSuperAdmin();
+}
+
+export function canManageUsers() {
+  return isSuperAdmin();
+}
+
+export async function register(username, email, password) {
+  const r = await fetch(`${BACKEND_URL}/api/auth/register-public`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ username, email, password }),
+  });
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(data.error || "Inscription échouée");
+  return data;
+}
+
 export async function login(username, password) {
   const r = await fetch(`${BACKEND_URL}/api/auth/login`, {
     method: "POST",

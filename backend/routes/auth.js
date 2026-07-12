@@ -6,7 +6,7 @@ import { audit } from "../auditLog.js";
 
 const router = Router();
 
-/* POST /api/auth/register */
+/* POST /api/auth/register — superadmin only (existing) */
 router.post("/register", authMiddleware, (req, res) => {
   if (req.user.role !== "superadmin") {
     return res.status(403).json({ error: "Seul un superadmin peut créer des comptes" });
@@ -18,11 +18,58 @@ router.post("/register", authMiddleware, (req, res) => {
   const existing = db.prepare("SELECT id FROM users WHERE username = ? OR email = ?").get(username, email);
   if (existing) return res.status(409).json({ error: "Utilisateur ou email déjà existant" });
   const hash = bcrypt.hashSync(password, 10);
-  const info = db.prepare("INSERT INTO users (username, email, password_hash, role) VALUES (?, ?, ?, ?)")
+  const info = db.prepare("INSERT INTO users (username, email, password_hash, role, status) VALUES (?, ?, ?, ?, 'approved')")
     .run(username, email, hash, role || "admin");
-  const user = db.prepare("SELECT id, username, email, role, created_at FROM users WHERE id = ?").get(info.lastInsertRowid);
+  const user = db.prepare("SELECT id, username, email, role, status, created_at FROM users WHERE id = ?").get(info.lastInsertRowid);
   audit("user", "create", { username: req.user.username, detail: `Compte créé: ${username} (${role || "admin"})`, severity: "info" });
   res.status(201).json(user);
+});
+
+/* POST /api/auth/register-public — public registration with pending status */
+router.post("/register-public", (req, res) => {
+  const { username, email, password } = req.body;
+  if (!username || !email || !password) {
+    return res.status(400).json({ error: "Champs manquants" });
+  }
+  if (password.length < 6) {
+    return res.status(400).json({ error: "Le mot de passe doit faire au moins 6 caractères" });
+  }
+  const existing = db.prepare("SELECT id FROM users WHERE username = ? OR email = ?").get(username, email);
+  if (existing) return res.status(409).json({ error: "Utilisateur ou email déjà existant" });
+  const hash = bcrypt.hashSync(password, 10);
+  const info = db.prepare("INSERT INTO users (username, email, password_hash, role, status) VALUES (?, ?, ?, 'admin', 'pending')")
+    .run(username, email, hash);
+  audit("user", "register_pending", { detail: `Nouvelle inscription: ${username} (${email}) — en attente de validation`, severity: "warning" });
+  res.status(201).json({ ok: true, message: "Compte créé. En attente de validation par un superadmin." });
+});
+
+/* GET /api/auth/pending — list pending users (superadmin only) */
+router.get("/pending", authMiddleware, (req, res) => {
+  if (req.user.role !== "superadmin") return res.status(403).json({ error: "Accès refusé" });
+  const users = db.prepare("SELECT id, username, email, role, status, created_at FROM users WHERE status = 'pending' ORDER BY created_at DESC").all();
+  res.json(users);
+});
+
+/* PUT /api/auth/users/:id/approve — approve pending user (superadmin only) */
+router.put("/users/:id/approve", authMiddleware, (req, res) => {
+  if (req.user.role !== "superadmin") return res.status(403).json({ error: "Accès refusé" });
+  const id = parseInt(req.params.id);
+  const info = db.prepare("UPDATE users SET status = 'approved' WHERE id = ? AND status = 'pending'").run(id);
+  if (info.changes === 0) return res.status(404).json({ error: "Utilisateur introuvable ou déjà validé" });
+  const user = db.prepare("SELECT id, username, email, role, status, created_at FROM users WHERE id = ?").get(id);
+  audit("user", "approve", { username: req.user.username, detail: `Compte approuvé: ${user.username}`, severity: "info" });
+  res.json(user);
+});
+
+/* PUT /api/auth/users/:id/reject — reject pending user (superadmin only) */
+router.put("/users/:id/reject", authMiddleware, (req, res) => {
+  if (req.user.role !== "superadmin") return res.status(403).json({ error: "Accès refusé" });
+  const id = parseInt(req.params.id);
+  const user = db.prepare("SELECT username FROM users WHERE id = ? AND status = 'pending'").get(id);
+  if (!user) return res.status(404).json({ error: "Utilisateur introuvable ou déjà validé" });
+  db.prepare("DELETE FROM users WHERE id = ?").run(id);
+  audit("user", "reject", { username: req.user.username, detail: `Compte rejeté: ${user.username}`, severity: "warning" });
+  res.json({ ok: true });
 });
 
 /* POST /api/auth/login */
@@ -33,6 +80,9 @@ router.post("/login", (req, res) => {
   if (!user || !bcrypt.compareSync(password, user.password_hash)) {
     audit("auth", "login_failed", { detail: `Tentative échouée: ${username}`, severity: "warning" });
     return res.status(401).json({ error: "Identifiants invalides" });
+  }
+  if (user.status === "pending") {
+    return res.status(403).json({ error: "Votre compte est en attente de validation par un superadmin" });
   }
   db.prepare("UPDATE users SET last_login = datetime('now') WHERE id = ?").run(user.id);
   const token = signToken(user);
@@ -66,7 +116,7 @@ router.post("/heartbeat", authMiddleware, (req, res) => {
 /* GET /api/auth/users — liste (superadmin only) */
 router.get("/users", authMiddleware, (req, res) => {
   if (req.user.role !== "superadmin") return res.status(403).json({ error: "Accès refusé" });
-  const users = db.prepare("SELECT id, username, email, role, created_at, last_login FROM users ORDER BY id").all();
+  const users = db.prepare("SELECT id, username, email, role, status, created_at, last_login FROM users ORDER BY id").all();
   res.json(users);
 });
 

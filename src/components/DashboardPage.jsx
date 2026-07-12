@@ -1,6 +1,7 @@
 import { Globe, Wifi, WifiOff, Zap, Server, AlertTriangle, CheckCircle, KeyRound, Clock, Shield, Activity, Layers, AppWindow } from "lucide-react";
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid } from "recharts";
 import { getStatus, STATUS } from "../constants";
+import LoginPanel from "./LoginPanel";
 
 /* ── Helpers ──────────────────────────────────────────────── */
 function getDomain(url) {
@@ -225,6 +226,11 @@ export default function DashboardPage({ groups = [], allUrls = [], allServers = 
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 26, paddingBottom: 24 }}>
+
+      {/* ── Zone d'authentification ── */}
+      <div style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", gap: 10 }}>
+        <LoginPanel groups={groups} />
+      </div>
 
       {/* ── Indicateur live ── */}
       {lastUrlCheck > 0 && (

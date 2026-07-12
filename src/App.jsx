@@ -32,7 +32,7 @@ import { loadTodos } from "./utils/todoStorage";
 import { clearSnapshots } from "./utils/snapshots";
 import { pushSync, pullSync, subscribeSyncStream } from "./utils/lanSync";
 import LoginPanel from "./components/LoginPanel";
-import { isLoggedIn as checkLoggedIn, verifyToken, logAppIncident, logItcareDisconnect, startHeartbeat } from "./utils/backendAuth";
+import { isLoggedIn as checkLoggedIn, verifyToken, logAppIncident, logItcareDisconnect, startHeartbeat, canEdit, canDelete, isSuperAdmin, getAuthUser } from "./utils/backendAuth";
 
 export default function App() {
   const [groups, setGroups] = useState(() => loadGroups() || getDefaultGroups());
@@ -611,16 +611,16 @@ export default function App() {
         groups={groups}
         activeGroupId={activeGroupId}
         onSelect={(id) => { setActiveGroupId(id); setActiveModule("monitor"); setMainTab("surveillance"); }}
-        onAddGroup={(name) => { addGroup(name); setActiveModule("monitor"); setMainTab("surveillance"); }}
-        onRemoveGroup={removeGroup}
-        onRenameGroup={renameGroup}
+        onAddGroup={canEdit() ? ((name) => { addGroup(name); setActiveModule("monitor"); setMainTab("surveillance"); }) : undefined}
+        onRemoveGroup={canDelete() ? removeGroup : undefined}
+        onRenameGroup={canEdit() ? renameGroup : undefined}
         open={sidebarOpen}
         onToggle={() => setSidebarOpen(o => !o)}
         isMobile={isMobile}
         checkingIds={checkingIds}
         totalUrls={allUrls.length}
         totalOnline={totalOnline}
-        onImport={(importedGroups) => setGroups(() => { saveGroups(importedGroups); return importedGroups; })}
+        onImport={canEdit() ? ((importedGroups) => setGroups(() => { saveGroups(importedGroups); return importedGroups; })) : undefined}
         activeModule={activeNavItem}
         journalBadge={incidentLog.filter(e => e.type !== "online").length}
         todoBadge={todoBadge}
@@ -687,7 +687,7 @@ export default function App() {
                   </div>
                 </>
               )}
-              {activeModule === "servers" && serverSubTab === "inventory" && <ServerImport isMobile={isMobile} />}
+              {activeModule === "servers" && serverSubTab === "inventory" && canEdit() && <ServerImport isMobile={isMobile} />}
             </div>
           </header>
           {/* Sous-onglets Serveurs */}
@@ -697,8 +697,10 @@ export default function App() {
                 { id: "inventory", label: "Inventaire" },
                 { id: "detail",    label: selectedServerId ? (isMobile ? "Détail" : `Détail · ${(filteredServers.find(s => s.id === selectedServerId) || allServers.find(s => s.id === selectedServerId))?.name || ""}`) : "Détail" },
                 { id: "agents",    label: `Agents VPS${agentsBadge > 0 ? ` (${agentsBadge} ✗)` : ""}` },
-                { id: "config",    label: isMobile ? "Config" : "Configuration agents" },
-                { id: "deploy",    label: "Déploiement" },
+                ...(isSuperAdmin() ? [
+                  { id: "config",    label: isMobile ? "Config" : "Configuration agents" },
+                  { id: "deploy",    label: "Déploiement" },
+                ] : []),
               ].map(({ id, label }) => (
                 <button key={id} onClick={() => setServerSubTab(id)} style={{
                   padding: isMobile ? "8px 12px" : "9px 16px", fontSize: isMobile ? 11 : 12, fontWeight: serverSubTab === id ? 700 : 400,
@@ -863,7 +865,7 @@ export default function App() {
           </div>
 
           {/* Ajout d’URL (masqué en vue globale) */}
-          {!isAllView && (
+          {!isAllView && canEdit() && (
             <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap", alignItems: "center" }}>
               <div style={{
                 display: "flex", flex: 1, minWidth: 260, gap: 8,
@@ -977,6 +979,7 @@ export default function App() {
 
           {/* ══ ONGLET PARAMÈTRES ══ */}
           {mainTab === "parametres" && (
+            checkLoggedIn() ? (
             <SettingsPage
               interval={interval}
               setInterval_={setInterval_}
@@ -994,6 +997,14 @@ export default function App() {
               allServers={filteredServers}
               onNavigate={(mod) => { setActiveModule(mod); setMainTab("surveillance"); }}
             />
+            ) : (
+              <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 16, padding: "60px 20px", textAlign: "center" }}>
+                <Lock size={32} color="#6B7280" />
+                <div style={{ fontSize: 14, color: "#9CA3AF", fontWeight: 600 }}>Accès restreint</div>
+                <div style={{ fontSize: 12, color: "#4B5563" }}>Connectez-vous pour accéder aux paramètres de l'application.</div>
+                <LoginPanel groups={groups} />
+              </div>
+            )
           )}
         </main>
       </div>

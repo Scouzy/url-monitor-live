@@ -203,7 +203,7 @@ export default function Sidebar({ groups, activeGroupId, onSelect, onAddGroup, o
         </button>
         {/* Logo centré */}
         <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 6, width: "100%" }}>
-          <img src="/g1oeil_icone_app.svg" alt="logo" style={{
+          <img src="/g1oeil_icone_app-black.svg" alt="logo" style={{
             width: showFull ? 52 : 38, height: showFull ? 52 : 38, borderRadius: 12, objectFit: "contain",
             transition: "width 0.25s ease, height 0.25s ease",
           }} />

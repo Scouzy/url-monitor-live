@@ -139,7 +139,7 @@ function ResourceChartsWithHistory({ server, snapshots }) {
   const dataHistory = useMemo(() => {
     if (range === "24h") return [];
     const now = Date.now();
-    const daysMap = { "1m": 30, "3m": 90, "6m": 180 };
+    const daysMap = { "7j": 7, "1m": 30, "3m": 90, "6m": 180 };
     const cutoff = now - (daysMap[range] || 30) * 86400000;
     const pts = snapshots
       .filter(s => s.servers[server.name] != null && s.ts >= cutoff)
@@ -179,7 +179,8 @@ function ResourceChartsWithHistory({ server, snapshots }) {
   ];
 
   const rangeOptions = [
-    { id: "24h", label: "Live" },
+    { id: "24h", label: "24h" },
+    { id: "7j",  label: "7j" },
     { id: "1m",  label: "1m" },
     { id: "3m",  label: "3m" },
     { id: "6m",  label: "6m" },

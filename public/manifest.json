@@ -7,24 +7,53 @@
   "background_color": "#0B0F19",
   "theme_color": "#0B0F19",
   "orientation": "portrait-primary",
+  "categories": ["productivity", "utilities", "monitoring"],
   "icons": [
     {
-      "src": "/g1oeil_icone_app.png",
+      "src": "/g1oeil-192.png",
       "sizes": "192x192",
       "type": "image/png",
       "purpose": "any"
     },
     {
-      "src": "/g1oeil_icone_app.png",
+      "src": "/g1oeil-maskable-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "/g1oeil-512.png",
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "any"
     },
     {
-      "src": "/g1oeil_icone_app.svg",
+      "src": "/g1oeil-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "/g1oeil_icone_app-black.svg",
       "sizes": "any",
       "type": "image/svg+xml",
       "purpose": "any"
+    }
+  ],
+  "screenshots": [
+    {
+      "src": "/og-image.png",
+      "sizes": "1200x630",
+      "type": "image/png",
+      "form_factor": "wide",
+      "label": "G1Oeil — Surveillance en temps réel"
+    },
+    {
+      "src": "/apple-splash-1170x2532.png",
+      "sizes": "1170x2532",
+      "type": "image/png",
+      "form_factor": "narrow",
+      "label": "G1Oeil — Vue mobile"
     }
   ]
 }

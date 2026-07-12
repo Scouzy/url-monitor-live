@@ -22,6 +22,7 @@ db.exec(`
     email TEXT UNIQUE NOT NULL,
     password_hash TEXT NOT NULL,
     role TEXT NOT NULL DEFAULT 'admin',
+    status TEXT NOT NULL DEFAULT 'approved',
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     last_login TEXT
   );
@@ -96,6 +97,14 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_audit_category ON audit_logs(category);
   CREATE INDEX IF NOT EXISTS idx_audit_created ON audit_logs(created_at DESC);
 `);
+
+/* ── Migration: add status column if missing ── */
+try {
+  db.prepare("SELECT status FROM users LIMIT 1").get();
+} catch {
+  db.exec("ALTER TABLE users ADD COLUMN status TEXT NOT NULL DEFAULT 'approved'");
+  console.log("[DB] Migration: added 'status' column to users table");
+}
 
 /* ── Seed admin par défaut ── */
 const adminExists = db.prepare("SELECT COUNT(*) as c FROM users WHERE username = 'admin'").get();

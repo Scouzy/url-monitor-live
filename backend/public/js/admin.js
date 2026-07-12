@@ -45,6 +45,21 @@ function el(tag, props = {}, ...children) {
 
 function clearApp() { document.getElementById("app").innerHTML = ""; }
 
+/* Convert a UTC datetime string (from SQLite) to local time display */
+function fmtDate(s) {
+  if (!s) return "—";
+  const d = new Date(s.includes("T") ? s : s.replace(" ", "T") + "Z");
+  if (isNaN(d)) return s;
+  return d.toLocaleString("fr-FR", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit", second: "2-digit" });
+}
+
+function fmtDateShort(s) {
+  if (!s) return "—";
+  const d = new Date(s.includes("T") ? s : s.replace(" ", "T") + "Z");
+  if (isNaN(d)) return s;
+  return d.toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit", year: "numeric" });
+}
+
 /* ── Auth ── */
 function logout() {
   token = null;
@@ -68,7 +83,7 @@ function renderLogin() {
   clearApp();
   const card = el("div", { className: "login-card" },
     el("div", { style: { display: "flex", alignItems: "center", gap: "10px", marginBottom: "16px" } },
-      el("img", { src: "/g1oeil_icone_app.svg", alt: "G1Oeil", style: { width: "36px", height: "36px" } }),
+      el("img", { src: "/g1oeil_icone_app-black.svg", alt: "G1Oeil", style: { width: "36px", height: "36px" } }),
       el("div", {},
         el("h1", { style: { marginBottom: "0" } }, "G1Oeil"),
         el("p", { style: { fontSize: "12px", color: "var(--text-muted)" } }, "Administration"),
@@ -110,7 +125,7 @@ function renderDashboard() {
   /* Sidebar */
   const sidebar = el("div", { className: "sidebar" },
     el("div", { className: "sidebar-header" },
-      el("img", { src: "/g1oeil_icone_app.svg", alt: "G1Oeil", style: { width: "28px", height: "28px" } }),
+      el("img", { src: "/g1oeil_icone_app-black.svg", alt: "G1Oeil", style: { width: "28px", height: "28px" } }),
       el("span", {}, "G1Oeil Admin"),
     ),
     el("nav", { className: "sidebar-nav" },
@@ -163,6 +178,57 @@ async function renderUrlsView(container) {
       tableWrap.appendChild(el("div", { className: "card", style: { textAlign: "center", color: "var(--text-muted)" } }, "Aucune URL configurée"));
       return;
     }
+
+    /* ── KPI ── */
+    const total = urls.length;
+    const simple = urls.filter(u => u.mode === "simple").length;
+    const authed = urls.filter(u => u.mode === "authenticated").length;
+    const withSteps = urls.filter(u => u.steps?.length > 0).length;
+    const totalSteps = urls.reduce((sum, u) => sum + (u.steps?.length || 0), 0);
+    const namedUrls = urls.filter(u => u.name);
+    const uniqueNames = new Set(namedUrls.map(u => u.name)).size;
+
+    const kpiData = [
+      { label: "Total URLs", value: total, color: "#6366F1", icon: "🔗" },
+      { label: "Mode Simple", value: simple, sub: `${Math.round(simple / total * 100)}%`, color: "#10B981", icon: "⚡" },
+      { label: "Mode Authentifié", value: authed, sub: `${Math.round(authed / total * 100)}%`, color: "#F59E0B", icon: "🔐" },
+      { label: "Avec étapes", value: withSteps, sub: `${totalSteps} étapes`, color: "#EC4899", icon: "📋" },
+      { label: "URLs par nom", value: uniqueNames, sub: `${namedUrls.length} URL(s) nommée(s)`, color: "#8B5CF6", icon: "🏷️" },
+    ];
+
+    const kpiRow = el("div", { style: { display: "grid", gridTemplateColumns: `repeat(${kpiData.length}, 1fr)`, gap: "12px", marginBottom: "16px" } },
+      ...kpiData.map(k => el("div", { className: "card", style: { padding: "14px 16px", display: "flex", flexDirection: "column", gap: "6px" } },
+        el("div", { style: { display: "flex", alignItems: "center", justifyContent: "space-between" } },
+          el("span", { style: { fontSize: 11, color: "var(--text-muted)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.04em" } }, k.label),
+          el("span", { style: { fontSize: 16 } }, k.icon),
+        ),
+        el("div", { style: { display: "flex", alignItems: "baseline", gap: "6px" } },
+          el("span", { style: { fontSize: 24, fontWeight: 800, color: k.color, fontFamily: "monospace" } }, String(k.value)),
+          k.sub && el("span", { style: { fontSize: 11, color: "var(--text-dim)" } }, k.sub),
+        ),
+      ))
+    );
+    tableWrap.appendChild(kpiRow);
+
+    /* ── Répartition par mode (barres horizontales) ── */
+    const modeData = [
+      { label: "Simple (HEAD)", count: simple, color: "#10B981" },
+      { label: "Authentifiée", count: authed, color: "#F59E0B" },
+    ];
+    const maxMode = Math.max(...modeData.map(m => m.count), 1);
+    const modeCard = el("div", { className: "card", style: { padding: "14px 16px", marginBottom: "16px" } },
+      el("div", { style: { fontSize: 12, fontWeight: 700, color: "var(--text-muted)", marginBottom: "10px", textTransform: "uppercase", letterSpacing: "0.04em" } }, "Répartition par mode"),
+      ...modeData.map(m => el("div", { style: { display: "flex", alignItems: "center", gap: "10px", marginBottom: "6px" } },
+        el("span", { style: { width: "120px", fontSize: 12, color: "var(--text)" } }, m.label),
+        el("div", { style: { flex: 1, height: 22, background: "rgba(255,255,255,0.04)", borderRadius: 6, overflow: "hidden" } },
+          el("div", { style: { width: `${(m.count / maxMode) * 100}%`, height: "100%", background: m.color, borderRadius: 6, transition: "width 0.4s ease", display: "flex", alignItems: "center", justifyContent: "flex-end", paddingRight: "6px" } },
+            el("span", { style: { fontSize: 10, fontWeight: 700, color: "#fff" } }, String(m.count)),
+          ),
+        ),
+        el("span", { style: { width: "40px", textAlign: "right", fontSize: 11, color: "var(--text-dim)", fontFamily: "monospace" } }, `${Math.round(m.count / total * 100)}%`),
+      )),
+    );
+    tableWrap.appendChild(modeCard);
 
     const table = el("table", {},
       el("thead", {},
@@ -579,7 +645,7 @@ async function renderUsersView(container) {
     const table = el("table", {},
       el("thead", {}, el("tr", {},
         el("th", {}, "ID"), el("th", {}, "Utilisateur"), el("th", {}, "Email"),
-        el("th", {}, "Rôle"), el("th", {}, "Créé"), el("th", {}, "Dernière connexion"),
+        el("th", {}, "Rôle"), el("th", {}, "Statut"), el("th", {}, "Créé"), el("th", {}, "Dernière connexion"),
         el("th", {}, "Actions"),
       )),
       el("tbody", {},
@@ -588,10 +654,22 @@ async function renderUsersView(container) {
           el("td", {}, u.username),
           el("td", {}, u.email),
           el("td", {}, el("span", { className: `badge ${u.role === "superadmin" ? "badge-warning" : "badge-primary"}` }, u.role)),
-          el("td", {}, u.created_at?.slice(0, 10) || "—"),
-          el("td", {}, u.last_login?.slice(0, 19) || "—"),
+          el("td", {}, el("span", { className: `badge ${u.status === "pending" ? "badge-danger" : "badge-success"}` }, u.status || "approved")),
+          el("td", {}, fmtDateShort(u.created_at)),
+          el("td", {}, fmtDate(u.last_login)),
           el("td", { style: { display: "flex", gap: "6px" } },
             currentUser?.role === "superadmin" && u.id !== currentUser.id ? [
+              ...(u.status === "pending" ? [
+                el("button", { className: "btn btn-primary btn-sm", onclick: async () => {
+                  try { await api(`/api/auth/users/${u.id}/approve`, { method: "PUT" }); toast("Compte approuvé"); renderDashboard(); }
+                  catch (e) { toast(e.message, "error"); }
+                } }, "Approuver"),
+                el("button", { className: "btn btn-danger btn-sm", onclick: async () => {
+                  if (!confirm(`Rejeter ${u.username} ?`)) return;
+                  try { await api(`/api/auth/users/${u.id}/reject`, { method: "PUT" }); toast("Compte rejeté"); renderDashboard(); }
+                  catch (e) { toast(e.message, "error"); }
+                } }, "Rejeter"),
+              ] : []),
               el("button", { className: "btn btn-secondary btn-sm", onclick: () => renderUserModal(u) }, "Éditer"),
               el("button", { className: "btn btn-danger btn-sm", onclick: async () => {
                 if (!confirm(`Supprimer ${u.username} ?`)) return;
@@ -720,7 +798,7 @@ async function renderLogsView(container) {
         )),
         el("tbody", {},
           ...logs.map(l => el("tr", {},
-            el("td", { style: { whiteSpace: "nowrap", fontSize: 11, fontFamily: "monospace" } }, l.created_at?.slice(0, 19) || "—"),
+            el("td", { style: { whiteSpace: "nowrap", fontSize: 11, fontFamily: "monospace" } }, fmtDate(l.created_at)),
             el("td", {}, el("span", { className: "badge badge-primary" }, catLabels[l.category] || l.category)),
             el("td", { style: { fontWeight: 600 } }, l.action),
             el("td", {}, l.username || "—"),
@@ -765,7 +843,7 @@ async function renderLogsView(container) {
           )),
           el("tbody", {},
             ...logs.map(l => el("tr", {},
-              el("td", { style: { fontSize: 11, fontFamily: "monospace", whiteSpace: "nowrap" } }, l.checked_at?.slice(0, 19) || "—"),
+              el("td", { style: { fontSize: 11, fontFamily: "monospace", whiteSpace: "nowrap" } }, fmtDate(l.checked_at)),
               el("td", {}, `Étape ${l.step_index}`),
               el("td", {}, el("span", { className: `badge ${l.error_code ? "badge-danger" : "badge-success"}` }, l.status || "—")),
               el("td", {}, l.error_code ? String(l.error_code) : "—"),
