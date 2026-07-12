@@ -208,7 +208,7 @@ export default function CapacityPlanning({ servers: propServers }) {
 
   const trend = isAll ? [] : fleetTrend(servers, metric);
   const dist  = isAll ? [] : distribution(servers, metric);
-  const top5  = isAll ? [] : topConsumers(servers, metric);
+  const top5  = isAll ? [] : topConsumers(servers, metric, servers.length);
   const recos = recommendations(servers);
   const maxDist = isAll ? 1 : Math.max(...dist.map(d => d.count), 1);
 
@@ -223,7 +223,7 @@ export default function CapacityPlanning({ servers: propServers }) {
   const breach = isAll ? null : trend.find(t => (t.projection ?? 0) >= 90);
   const allData = isAll ? METRICS.map(m => {
     const d = distribution(servers, m.id);
-    return { ...m, trend: fleetTrend(servers, m.id), dist: d, top5: topConsumers(servers, m.id), maxDist: Math.max(...d.map(x => x.count), 1) };
+    return { ...m, trend: fleetTrend(servers, m.id), dist: d, top5: topConsumers(servers, m.id, servers.length), maxDist: Math.max(...d.map(x => x.count), 1) };
   }) : null;
 
   return (
@@ -387,12 +387,14 @@ export default function CapacityPlanning({ servers: propServers }) {
             ))}
           </div>
 
-          {/* 3 top5 */}
+          {/* 3 classements par métrique */}
           <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 16 }}>
             {allData.map(m => (
               <div key={m.id} style={card}>
-                {cardTitle(Trophy, `Top 5 ${m.label}`)}
-                <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                {cardTitle(Trophy, `Classement ${m.label}`,
+                  <span style={{ fontSize: 10, color: "#6B7280" }}>{m.top5.length} serveurs</span>
+                )}
+                <div style={{ display: "flex", flexDirection: "column", gap: 6, maxHeight: 320, overflowY: "auto" }}>
                   {m.top5.map((s, i) => (
                     <div key={s.id} onClick={() => setSelectedServerId(s.id)}
                       style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 10px", cursor: "pointer", borderRadius: 8,
@@ -519,10 +521,12 @@ export default function CapacityPlanning({ servers: propServers }) {
           </div>
         </div>
 
-        {/* Top 5 */}
+        {/* Classement tous serveurs */}
         <div style={card}>
-          {cardTitle(Trophy, `Top 5 consommateurs ${meta.label}`)}
-          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          {cardTitle(Trophy, `Classement ${meta.label}`,
+            <span style={{ fontSize: 10, color: "#6B7280" }}>{top5.length} serveurs</span>
+          )}
+          <div style={{ display: "flex", flexDirection: "column", gap: 8, maxHeight: 400, overflowY: "auto" }}>
             {top5.map((s, i) => (
               <div key={s.id}
                 onClick={() => setSelectedServerId(s.id)}
@@ -578,79 +582,6 @@ export default function CapacityPlanning({ servers: propServers }) {
       </div>
 
       </>)}
-
-      {/* Recommandations */}
-      <div style={{ ...card, border: recos.some(r => r.severity === "critical") ? "1px solid rgba(248,113,113,0.3)" : card.border }}>
-        {cardTitle(Lightbulb, `Recommandations automatiques (${recos.length})`)}
-        {recos.length === 0 ? (
-          <div style={{ padding: "20px 0", textAlign: "center", fontSize: 12, color: "#34D399" }}>
-            ✓ Aucune action requise — la capacité est saine
-          </div>
-        ) : (
-          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-            {recos.map((r, i) => {
-              const sm = SEVERITY_META[r.severity];
-              return (
-                <div key={i} style={{
-                  display: "flex", alignItems: "flex-start", gap: 10, padding: "10px 14px",
-                  background: sm.bg, border: `1px solid ${sm.border}`, borderRadius: 10,
-                  animation: `fadeIn 0.3s ease ${i * 0.05}s both`,
-                }}>
-                  <sm.Icon size={14} color={sm.color} style={{ marginTop: 1, flexShrink: 0 }} />
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: 12, color: "#D1D5DB", lineHeight: 1.5 }}>{r.text}</div>
-                  </div>
-                  <span style={{
-                    fontSize: 9, fontWeight: 700, padding: "2px 8px", borderRadius: 10, flexShrink: 0,
-                    background: `${sm.color}1A`, color: sm.color, border: `1px solid ${sm.border}`,
-                    textTransform: "uppercase", letterSpacing: "0.05em",
-                  }}>{sm.label}</span>
-                  <button onClick={() => setActionReco(r)} style={{
-                    display: "flex", alignItems: "center", gap: 5, padding: "4px 10px", borderRadius: 8, cursor: "pointer",
-                    background: "rgba(99,102,241,0.1)", border: "1px solid rgba(99,102,241,0.3)",
-                    color: "#818CF8", fontSize: 10, fontWeight: 600, flexShrink: 0, whiteSpace: "nowrap",
-                  }}>
-                    <ClipboardList size={10} /> Plan d'action
-                  </button>
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </div>
-
-      {/* ══ ÉVOLUTION DES RESSOURCES FLOTTE (12 mois+) ══ */}
-      {fleetEvo.length >= 2 && (
-        <div style={card}>
-          {cardTitle(TrendingUp, "Évolution des ressources de la flotte",
-            <span style={{ fontSize: 10, color: "#6B7280" }}>{fleetEvo.length} mois d'historique</span>
-          )}
-          <div style={{ height: 220 }}>
-            <ResponsiveContainer width="100%" height="100%">
-              <ComposedChart data={fleetEvo} margin={{ top: 6, right: 12, bottom: 0, left: -8 }}>
-                <CartesianGrid stroke="rgba(255,255,255,0.05)" vertical={false} />
-                <XAxis dataKey="label" tick={{ fontSize: 9, fill: "#6B7280" }} axisLine={false} tickLine={false} />
-                <YAxis yAxisId="left" tick={{ fontSize: 9, fill: "#6B7280" }} axisLine={false} tickLine={false} />
-                <YAxis yAxisId="right" orientation="right" tick={{ fontSize: 9, fill: "#6B7280" }} axisLine={false} tickLine={false} />
-                <Tooltip
-                  contentStyle={{ background: "#1F2937", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8, fontSize: 11 }}
-                  labelStyle={{ color: "#9CA3AF" }}
-                  formatter={(v, name) => {
-                    if (v == null) return ["—", name];
-                    if (name === "Serveurs") return [v, name];
-                    return [`${v} Go`, name];
-                  }}
-                />
-                <Legend wrapperStyle={{ fontSize: 10 }} />
-                <Bar yAxisId="right" dataKey="serverCount" name="Serveurs" fill="rgba(156,163,175,0.2)" radius={[4, 4, 0, 0]} />
-                <Line yAxisId="left" type="monotone" dataKey="totalRamGb" name="RAM Go" stroke="#EC4899" strokeWidth={2.5} dot={{ r: 3, fill: "#EC4899" }} />
-                <Line yAxisId="left" type="monotone" dataKey="totalDiskGb" name="Disque Go" stroke="#FBBF24" strokeWidth={2.5} dot={{ r: 3, fill: "#FBBF24" }} />
-                <Line yAxisId="right" type="monotone" dataKey="totalCores" name="CPU cœurs" stroke="#818CF8" strokeWidth={2} strokeDasharray="5 3" dot={{ r: 2, fill: "#818CF8" }} />
-              </ComposedChart>
-            </ResponsiveContainer>
-          </div>
-        </div>
-      )}
 
       {/* ══ ÉVOLUTION RESSOURCES PAR SERVEUR ══ */}
       <div style={card}>
@@ -731,6 +662,79 @@ export default function CapacityPlanning({ servers: propServers }) {
           </div>
         )}
       </div>
+
+      {/* Recommandations */}
+      <div style={{ ...card, border: recos.some(r => r.severity === "critical") ? "1px solid rgba(248,113,113,0.3)" : card.border }}>
+        {cardTitle(Lightbulb, `Recommandations automatiques (${recos.length})`)}
+        {recos.length === 0 ? (
+          <div style={{ padding: "20px 0", textAlign: "center", fontSize: 12, color: "#34D399" }}>
+            ✓ Aucune action requise — la capacité est saine
+          </div>
+        ) : (
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            {recos.map((r, i) => {
+              const sm = SEVERITY_META[r.severity];
+              return (
+                <div key={i} style={{
+                  display: "flex", alignItems: "flex-start", gap: 10, padding: "10px 14px",
+                  background: sm.bg, border: `1px solid ${sm.border}`, borderRadius: 10,
+                  animation: `fadeIn 0.3s ease ${i * 0.05}s both`,
+                }}>
+                  <sm.Icon size={14} color={sm.color} style={{ marginTop: 1, flexShrink: 0 }} />
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 12, color: "#D1D5DB", lineHeight: 1.5 }}>{r.text}</div>
+                  </div>
+                  <span style={{
+                    fontSize: 9, fontWeight: 700, padding: "2px 8px", borderRadius: 10, flexShrink: 0,
+                    background: `${sm.color}1A`, color: sm.color, border: `1px solid ${sm.border}`,
+                    textTransform: "uppercase", letterSpacing: "0.05em",
+                  }}>{sm.label}</span>
+                  <button onClick={() => setActionReco(r)} style={{
+                    display: "flex", alignItems: "center", gap: 5, padding: "4px 10px", borderRadius: 8, cursor: "pointer",
+                    background: "rgba(99,102,241,0.1)", border: "1px solid rgba(99,102,241,0.3)",
+                    color: "#818CF8", fontSize: 10, fontWeight: 600, flexShrink: 0, whiteSpace: "nowrap",
+                  }}>
+                    <ClipboardList size={10} /> Plan d'action
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* ══ ÉVOLUTION DES RESSOURCES FLOTTE (12 mois+) ══ */}
+      {fleetEvo.length >= 2 && (
+        <div style={card}>
+          {cardTitle(TrendingUp, "Évolution des ressources de la flotte",
+            <span style={{ fontSize: 10, color: "#6B7280" }}>{fleetEvo.length} mois d'historique</span>
+          )}
+          <div style={{ height: 220 }}>
+            <ResponsiveContainer width="100%" height="100%">
+              <ComposedChart data={fleetEvo} margin={{ top: 6, right: 12, bottom: 0, left: -8 }}>
+                <CartesianGrid stroke="rgba(255,255,255,0.05)" vertical={false} />
+                <XAxis dataKey="label" tick={{ fontSize: 9, fill: "#6B7280" }} axisLine={false} tickLine={false} />
+                <YAxis yAxisId="left" tick={{ fontSize: 9, fill: "#6B7280" }} axisLine={false} tickLine={false} />
+                <YAxis yAxisId="right" orientation="right" tick={{ fontSize: 9, fill: "#6B7280" }} axisLine={false} tickLine={false} />
+                <Tooltip
+                  contentStyle={{ background: "#1F2937", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8, fontSize: 11 }}
+                  labelStyle={{ color: "#9CA3AF" }}
+                  formatter={(v, name) => {
+                    if (v == null) return ["—", name];
+                    if (name === "Serveurs") return [v, name];
+                    return [`${v} Go`, name];
+                  }}
+                />
+                <Legend wrapperStyle={{ fontSize: 10 }} />
+                <Bar yAxisId="right" dataKey="serverCount" name="Serveurs" fill="rgba(156,163,175,0.2)" radius={[4, 4, 0, 0]} />
+                <Line yAxisId="left" type="monotone" dataKey="totalRamGb" name="RAM Go" stroke="#EC4899" strokeWidth={2.5} dot={{ r: 3, fill: "#EC4899" }} />
+                <Line yAxisId="left" type="monotone" dataKey="totalDiskGb" name="Disque Go" stroke="#FBBF24" strokeWidth={2.5} dot={{ r: 3, fill: "#FBBF24" }} />
+                <Line yAxisId="right" type="monotone" dataKey="totalCores" name="CPU cœurs" stroke="#818CF8" strokeWidth={2} strokeDasharray="5 3" dot={{ r: 2, fill: "#818CF8" }} />
+              </ComposedChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+      )}
 
       {/* ══ TIMELINE DES AJOUTS DE RESSOURCES ══ */}
       {resEvents.length > 0 && (
