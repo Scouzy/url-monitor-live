@@ -96,6 +96,19 @@ db.exec(`
 
   CREATE INDEX IF NOT EXISTS idx_audit_category ON audit_logs(category);
   CREATE INDEX IF NOT EXISTS idx_audit_created ON audit_logs(created_at DESC);
+
+  CREATE TABLE IF NOT EXISTS api_keys (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    key_prefix TEXT NOT NULL,
+    key_hash TEXT NOT NULL UNIQUE,
+    app_name TEXT NOT NULL,
+    description TEXT,
+    permissions TEXT NOT NULL DEFAULT 'read',
+    is_active INTEGER NOT NULL DEFAULT 1,
+    created_by TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    last_used TEXT
+  );
 `);
 
 /* ── Migration: add status column if missing ── */

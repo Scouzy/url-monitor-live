@@ -3,13 +3,13 @@ import {
   Cpu, MemoryStick, HardDrive, TrendingUp, AlertTriangle,
   Layers, Eye, Flame, Trophy, Lightbulb, AppWindow,
   X, CheckCircle, ClipboardList, GitBranch, Network, Activity,
-  Database, Server, Zap, ArrowUpCircle, ArrowDownCircle, Gauge,
+  Database, Server, Zap, ArrowUpCircle, ArrowDownCircle, Gauge, Search,
 } from "lucide-react";
 import {
   ResponsiveContainer, ComposedChart, Line, XAxis, YAxis, Tooltip,
   CartesianGrid, ReferenceLine, Area, BarChart, Bar, Legend,
 } from "recharts";
-import { getServers, subscribeServers, fleetTrend, distribution, topConsumers, recommendations, gaugeColor, ROLES } from "../utils/servers";
+import { getServers, subscribeServers, fleetTrend, distribution, topConsumers, recommendations, gaugeColor, saturationMonth, ROLES } from "../utils/servers";
 import { loadSnapshots } from "../utils/snapshots";
 import {
   monthlyResourceHistory, resourceEvents, serverResourceTimeline,
@@ -203,27 +203,79 @@ export default function CapacityPlanning({ servers: propServers }) {
   const selectedServer = selectedServerId ? servers.find(s => s.id === selectedServerId) : null;
   const [actionReco, setActionReco] = useState(null);
   const [resourceServer, setResourceServer] = useState(null);
+  const [growthSearch, setGrowthSearch] = useState("");
   const isAll = metric === "all";
   const meta = METRICS.find(m => m.id === metric) ?? { id: "all", label: "Vue globale", color: "#9CA3AF" };
 
   const trend = isAll ? [] : fleetTrend(servers, metric);
-  const dist  = isAll ? [] : distribution(servers, metric);
+  const dist  = isAll ? [] : distribution(servers, metric).map(b => ({ ...b, pct: servers.length > 0 ? Math.round(b.count / servers.length * 100) : 0 }));
   const top5  = isAll ? [] : topConsumers(servers, metric, servers.length);
   const recos = recommendations(servers);
   const maxDist = isAll ? 1 : Math.max(...dist.map(d => d.count), 1);
+  const distStats = isAll ? { min: 0, max: 0, avg: 0 } : (() => {
+    const vals = servers.map(s => s[metric] ?? 0).filter(v => v > 0);
+    if (!vals.length) return { min: 0, max: 0, avg: 0 };
+    return { min: Math.min(...vals), max: Math.max(...vals), avg: Math.round(vals.reduce((a, b) => a + b, 0) / vals.length) };
+  })();
+  const distAlerts = isAll ? 0 : dist.filter(b => b.min >= 75).reduce((s, b) => s + b.count, 0);
 
   /* ── Données historique ressources ── */
   const fleetSummary = useMemo(() => fleetResourceSummary(servers), [servers]);
   const fleetEvo     = useMemo(() => fleetResourceEvolution(snapshots), [snapshots]);
-  const resEvents    = useMemo(() => resourceEvents(snapshots), [snapshots]);
+  const resEvents    = useMemo(() => {
+    const real = resourceEvents(snapshots).filter(ev => {
+      if (ev.server === "PEBFCOADMCLI01" || ev.server === "PEBFCOORDESOF01") return false;
+      if (ev.field === "ramGb" && ["PEBFCSICORDS01", "PEBFCSICORDS02", "PEBFCSICORDS03"].includes(ev.server)) {
+        const s = servers.find(srv => srv.name === ev.server);
+        if (s && s.ram < 20) return false;
+      }
+      return true;
+    });
+    const hasEvent = (name, field) => real.some(ev => ev.server === name && ev.field === field);
+    const RESOURCE_CONFIG = [
+      { metric: "cpu",  field: "cores",  fieldLabel: "CPU (cœurs)", unit: "",   threshold: 75 },
+      { metric: "ram",  field: "ramGb",  fieldLabel: "RAM",          unit: " Go", threshold: 75 },
+      { metric: "disk", field: "diskGb", fieldLabel: "Disque",       unit: " Go", threshold: 75 },
+    ];
+    const additions = [];
+    for (const s of servers) {
+      for (const { metric, field, fieldLabel, unit, threshold } of RESOURCE_CONFIG) {
+        if (s[metric] < threshold) continue;
+        if (hasEvent(s.name, field)) continue;
+        const currentVal = s[field] ?? (field === "cores" ? 4 : 100);
+        const usedPct = s[metric];
+        let addQty, newVal;
+        if (field === "cores") {
+          const neededCores = Math.ceil(currentVal * usedPct / 70);
+          addQty = Math.max(2, neededCores - currentVal);
+          newVal = currentVal + addQty;
+        } else {
+          const usedGo = Math.round(currentVal * usedPct / 100);
+          const targetVal = Math.ceil(usedGo / 0.70);
+          addQty = Math.max(50, targetVal - currentVal);
+          newVal = currentVal + addQty;
+        }
+        const deadline = saturationMonth(s, metric, 90);
+        additions.push({
+          type: "add", server: s.name, field, fieldLabel,
+          oldValue: currentVal, newValue: newVal, delta: addQty, unit,
+          label: deadline ? `Avant ${deadline}` : "Urgent",
+        });
+      }
+    }
+    return [...real, ...additions];
+  }, [snapshots, servers]);
   const growthRates  = useMemo(() => serverGrowthRates(snapshots), [snapshots]);
   const serverTimeline = useMemo(() => resourceServer ? serverResourceTimeline(resourceServer, snapshots) : null, [resourceServer, snapshots]);
 
   /* Mois de franchissement du seuil pour la flotte */
   const breach = isAll ? null : trend.find(t => (t.projection ?? 0) >= 90);
   const allData = isAll ? METRICS.map(m => {
-    const d = distribution(servers, m.id);
-    return { ...m, trend: fleetTrend(servers, m.id), dist: d, top5: topConsumers(servers, m.id, servers.length), maxDist: Math.max(...d.map(x => x.count), 1) };
+    const d = distribution(servers, m.id).map(b => ({ ...b, pct: servers.length > 0 ? Math.round(b.count / servers.length * 100) : 0 }));
+    const vals = servers.map(s => s[m.id] ?? 0).filter(v => v > 0);
+    const stats = vals.length ? { min: Math.min(...vals), max: Math.max(...vals), avg: Math.round(vals.reduce((a, b) => a + b, 0) / vals.length) } : { min: 0, max: 0, avg: 0 };
+    const alerts = d.filter(b => b.min >= 75).reduce((s, b) => s + b.count, 0);
+    return { ...m, trend: fleetTrend(servers, m.id), dist: d, top5: topConsumers(servers, m.id, servers.length), maxDist: Math.max(...d.map(x => x.count), 1), stats, alerts };
   }) : null;
 
   return (
@@ -366,23 +418,58 @@ export default function CapacityPlanning({ servers: propServers }) {
           {/* 3 distributions */}
           <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 16 }}>
             {allData.map(m => (
-              <div key={m.id} style={card}>
-                {cardTitle(Layers, `Distribution ${m.label}`)}
-                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              <div key={m.id} style={{ ...card, padding: 0 }}>
+                {/* Header */}
+                <div style={{ padding: "10px 14px", borderBottom: "1px solid rgba(255,255,255,0.06)", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
+                    <div style={{ width: 22, height: 22, borderRadius: 6, background: `${m.color}18`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                      <m.Icon size={12} color={m.color} />
+                    </div>
+                    <span style={{ fontSize: 11, fontWeight: 700, color: m.color, textTransform: "uppercase", letterSpacing: "0.06em" }}>{m.label}</span>
+                  </div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    {m.alerts > 0 && (
+                      <span style={{ fontSize: 9, fontWeight: 700, color: "#F87171", background: "rgba(248,113,113,0.12)", padding: "1px 6px", borderRadius: 8, border: "1px solid rgba(248,113,113,0.2)" }}>
+                        {m.alerts}⚠
+                      </span>
+                    )}
+                    <span style={{ fontSize: 15, fontWeight: 800, color: m.stats.avg >= 75 ? "#F87171" : m.stats.avg >= 50 ? "#FBBF24" : m.color, fontFamily: "'JetBrains Mono', monospace" }}>
+                      {m.stats.avg}%
+                    </span>
+                  </div>
+                </div>
+                {/* Tranches */}
+                <div style={{ padding: "10px 14px", display: "flex", flexDirection: "column", gap: 6 }}>
                   {m.dist.map(b => {
-                    const bc = b.min >= 90 ? "#F87171" : b.min >= 75 ? "#FB923C" : b.min >= 50 ? "#FBBF24" : m.color;
+                    const bc = b.min >= 90 ? "#F87171" : b.min >= 75 ? "#FB923C" : b.min >= 50 ? "#FBBF24" : b.color;
+                    const barPct = (b.count / m.maxDist) * 100;
                     return (
-                      <div key={b.label} style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                        <span style={{ width: 52, fontSize: 10, color: "#9CA3AF", fontFamily: "'JetBrains Mono', monospace", flexShrink: 0 }}>{b.label}</span>
-                        <div style={{ flex: 1, height: 14, background: "rgba(255,255,255,0.04)", borderRadius: 4, overflow: "hidden" }}>
-                          <div style={{ width: `${(b.count / m.maxDist) * 100}%`, height: "100%", background: `linear-gradient(90deg, ${bc}99, ${bc})`, borderRadius: 4, transition: "width 0.5s" }} />
+                      <div key={b.label} style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                        <div style={{ width: 5, height: 5, borderRadius: "50%", background: b.count > 0 ? bc : "#2D3748", flexShrink: 0 }} />
+                        <span style={{ width: 44, fontSize: 9, color: b.count > 0 ? "#9CA3AF" : "#4B5563", fontFamily: "'JetBrains Mono', monospace", flexShrink: 0 }}>{b.label}</span>
+                        <div style={{ flex: 1, height: 12, background: "rgba(255,255,255,0.03)", borderRadius: 3, overflow: "hidden", position: "relative" }}>
+                          <div style={{ width: `${barPct}%`, height: "100%", background: b.count > 0 ? `linear-gradient(90deg, ${bc}88, ${bc})` : "transparent", borderRadius: 3, transition: "width 0.5s", minWidth: b.count > 0 ? 10 : 0 }} />
+                          {b.count > 0 && barPct > 35 && (
+                            <span style={{ position: "absolute", right: 4, top: "50%", transform: "translateY(-50%)", fontSize: 8, fontWeight: 700, color: "#fff", fontFamily: "'JetBrains Mono', monospace" }}>{b.pct}%</span>
+                          )}
                         </div>
-                        <span style={{ width: 20, fontSize: 11, fontWeight: 700, color: b.count > 0 ? bc : "#374151", fontFamily: "'JetBrains Mono', monospace", textAlign: "right", flexShrink: 0 }}>{b.count}</span>
+                        <span style={{ width: 18, fontSize: 10, fontWeight: 700, color: b.count > 0 ? bc : "#374151", fontFamily: "'JetBrains Mono', monospace", textAlign: "right", flexShrink: 0 }}>{b.count}</span>
                       </div>
                     );
                   })}
                 </div>
-                <div style={{ marginTop: 10, fontSize: 10, color: "#4B5563", textAlign: "center" }}>{servers.length} serveurs</div>
+                {/* Footer */}
+                <div style={{ padding: "6px 14px", borderTop: "1px solid rgba(255,255,255,0.04)", display: "flex", justifyContent: "space-between", alignItems: "center", background: "rgba(255,255,255,0.015)" }}>
+                  <div style={{ display: "flex", gap: 10 }}>
+                    <span style={{ fontSize: 8, color: "#6B7280" }}>
+                      <span style={{ color: "#4B5563" }}>min</span> <span style={{ fontWeight: 700, color: "#9CA3AF", fontFamily: "'JetBrains Mono', monospace" }}>{m.stats.min}%</span>
+                    </span>
+                    <span style={{ fontSize: 8, color: "#6B7280" }}>
+                      <span style={{ color: "#4B5563" }}>max</span> <span style={{ fontWeight: 700, color: m.stats.max >= 90 ? "#F87171" : "#9CA3AF", fontFamily: "'JetBrains Mono', monospace" }}>{m.stats.max}%</span>
+                    </span>
+                  </div>
+                  <span style={{ fontSize: 8, color: "#4B5563" }}>{servers.length} serv.</span>
+                </div>
               </div>
             ))}
           </div>
@@ -491,33 +578,76 @@ export default function CapacityPlanning({ servers: propServers }) {
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
 
         {/* Distribution */}
-        <div style={card}>
-          {cardTitle(Layers, `Distribution ${meta.label} par tranche`)}
-          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+        <div style={{ ...card, padding: 0, display: "flex", flexDirection: "column", height: "100%" }}>
+          {/* Header */}
+          <div style={{ padding: "12px 16px", borderBottom: "1px solid rgba(255,255,255,0.06)", display: "flex", alignItems: "center", justifyContent: "space-between", flexShrink: 0 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <div style={{ width: 26, height: 26, borderRadius: 8, background: `${meta.color}18`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                <meta.Icon size={14} color={meta.color} />
+              </div>
+              <span style={{ fontSize: 12, fontWeight: 700, color: meta.color, textTransform: "uppercase", letterSpacing: "0.06em" }}>Distribution {meta.label}</span>
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              {distAlerts > 0 && (
+                <span style={{ fontSize: 10, fontWeight: 700, color: "#F87171", background: "rgba(248,113,113,0.12)", padding: "2px 8px", borderRadius: 10, border: "1px solid rgba(248,113,113,0.2)" }}>
+                  {distAlerts} alerte{distAlerts > 1 ? "s" : ""}
+                </span>
+              )}
+              <span style={{ fontSize: 18, fontWeight: 800, color: distStats.avg >= 75 ? "#F87171" : distStats.avg >= 50 ? "#FBBF24" : meta.color, fontFamily: "'JetBrains Mono', monospace" }}>
+                {distStats.avg}%
+              </span>
+            </div>
+          </div>
+
+          {/* Tranches — single column, fills remaining height */}
+          <div style={{ padding: "10px 16px 14px", display: "flex", flexDirection: "column", gap: 10, flex: 1, justifyContent: "space-evenly" }}>
             {dist.map(b => {
-              const barColor = b.min >= 90 ? "#F87171" : b.min >= 75 ? "#FB923C" : b.min >= 50 ? "#FBBF24" : meta.color;
+              const barColor = b.min >= 90 ? "#F87171" : b.min >= 75 ? "#FB923C" : b.min >= 50 ? "#FBBF24" : b.color;
+              const barPct = (b.count / maxDist) * 100;
               return (
-                <div key={b.label} style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                  <span style={{ width: 56, fontSize: 11, color: "#9CA3AF", fontFamily: "'JetBrains Mono', monospace", flexShrink: 0 }}>
+                <div key={b.label} style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                  <div style={{ width: 6, height: 6, borderRadius: "50%", background: b.count > 0 ? barColor : "#2D3748", flexShrink: 0, boxShadow: b.count > 0 && b.min >= 90 ? `0 0 5px ${barColor}` : "none" }} />
+                  <span style={{ fontSize: 9, color: b.count > 0 ? "#9CA3AF" : "#4B5563", width: 42, flexShrink: 0, fontFamily: "'JetBrains Mono', monospace" }}>
                     {b.label}
                   </span>
-                  <div style={{ flex: 1, height: 18, background: "rgba(255,255,255,0.04)", borderRadius: 6, overflow: "hidden" }}>
+                  <div style={{ flex: 1, height: 26, background: "rgba(255,255,255,0.03)", borderRadius: 5, overflow: "hidden", position: "relative" }}>
                     <div style={{
-                      width: `${(b.count / maxDist) * 100}%`, height: "100%",
-                      background: `linear-gradient(90deg, ${barColor}99, ${barColor})`,
-                      borderRadius: 6, transition: "width 0.7s cubic-bezier(0.4,0,0.2,1)",
-                      minWidth: b.count > 0 ? 18 : 0,
+                      width: `${barPct}%`, height: "100%",
+                      background: b.count > 0 ? `linear-gradient(90deg, ${barColor}88, ${barColor})` : "transparent",
+                      borderRadius: 5, transition: "width 0.5s ease",
+                      minWidth: b.count > 0 ? 12 : 0,
                     }} />
+                    {b.count > 0 && (
+                      <span style={{ position: "absolute", right: 8, top: "50%", transform: "translateY(-50%)", fontSize: 10, fontWeight: 700, color: "#fff", fontFamily: "'JetBrains Mono', monospace" }}>
+                        {b.pct}%
+                      </span>
+                    )}
                   </div>
-                  <span style={{ width: 22, fontSize: 12, fontWeight: 700, color: b.count > 0 ? barColor : "#374151", fontFamily: "'JetBrains Mono', monospace", textAlign: "right", flexShrink: 0 }}>
-                    {b.count}
+                  <span style={{ fontSize: 12, fontWeight: 700, color: b.count > 0 ? barColor : "#374151", fontFamily: "'JetBrains Mono', monospace", width: 32, textAlign: "right", flexShrink: 0 }}>
+                    {b.count > 0 ? `${b.count}` : "·"}
                   </span>
                 </div>
               );
             })}
           </div>
-          <div style={{ marginTop: 12, fontSize: 10, color: "#4B5563", textAlign: "center" }}>
-            {servers.length} serveurs au total
+
+          {/* Footer */}
+          <div style={{ padding: "8px 16px", borderTop: "1px solid rgba(255,255,255,0.04)", display: "flex", justifyContent: "space-between", alignItems: "center", background: "rgba(255,255,255,0.015)", flexShrink: 0 }}>
+            <div style={{ display: "flex", gap: 14 }}>
+              <span style={{ fontSize: 9, color: "#6B7280" }}>
+                <span style={{ color: "#4B5563" }}>min</span>{" "}
+                <span style={{ fontWeight: 700, color: "#9CA3AF", fontFamily: "'JetBrains Mono', monospace" }}>{distStats.min}%</span>
+              </span>
+              <span style={{ fontSize: 9, color: "#6B7280" }}>
+                <span style={{ color: "#4B5563" }}>max</span>{" "}
+                <span style={{ fontWeight: 700, color: distStats.max >= 90 ? "#F87171" : "#9CA3AF", fontFamily: "'JetBrains Mono', monospace" }}>{distStats.max}%</span>
+              </span>
+              <span style={{ fontSize: 9, color: "#6B7280" }}>
+                <span style={{ color: "#4B5563" }}>avg</span>{" "}
+                <span style={{ fontWeight: 700, color: distStats.avg >= 75 ? "#F87171" : distStats.avg >= 50 ? "#FBBF24" : "#9CA3AF", fontFamily: "'JetBrains Mono', monospace" }}>{distStats.avg}%</span>
+              </span>
+            </div>
+            <span style={{ fontSize: 9, color: "#4B5563" }}>{servers.length} serveur{servers.length > 1 ? "s" : ""}</span>
           </div>
         </div>
 
@@ -704,14 +834,77 @@ export default function CapacityPlanning({ servers: propServers }) {
       </div>
 
       {/* ══ ÉVOLUTION DES RESSOURCES FLOTTE (12 mois+) ══ */}
-      {fleetEvo.length >= 2 && (
+      {fleetEvo.length >= 2 && (() => {
+        const latest = fleetEvo[fleetEvo.length - 1];
+        const first = fleetEvo[0];
+        const ramDelta = latest.totalRamGb - first.totalRamGb;
+        const diskDelta = latest.totalDiskGb - first.totalDiskGb;
+        const coresDelta = latest.totalCores - first.totalCores;
+        const serverDelta = latest.serverCount - first.serverCount;
+        return (
         <div style={card}>
           {cardTitle(TrendingUp, "Évolution des ressources de la flotte",
-            <span style={{ fontSize: 10, color: "#6B7280" }}>{fleetEvo.length} mois d'historique</span>
+            <span style={{ fontSize: 10, color: "#6B7280" }}>{fleetEvo.length} mois · {first.label} → {latest.label}</span>
           )}
-          <div style={{ height: 220 }}>
+          {/* Summary stat cards */}
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 10, marginBottom: 14 }}>
+            {[
+              { label: "CPU cœurs", value: latest.totalCores, delta: coresDelta, unit: "", color: "#818CF8", icon: Cpu },
+              { label: "RAM totale", value: latest.totalRamGb, delta: ramDelta, unit: " Go", color: "#EC4899", icon: MemoryStick },
+              { label: "Disque total", value: latest.totalDiskGb, delta: diskDelta, unit: " Go", color: "#FBBF24", icon: HardDrive },
+              { label: "Serveurs", value: latest.serverCount, delta: serverDelta, unit: "", color: "#9CA3AF", icon: Server },
+            ].map(({ label: lbl, value, delta, unit, color, icon: Ic }) => (
+              <div key={lbl} style={{ padding: "10px 12px", background: "rgba(255,255,255,0.03)", borderRadius: 10, border: "1px solid rgba(255,255,255,0.06)" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6 }}>
+                  <Ic size={12} color={color} />
+                  <span style={{ fontSize: 9, color: "#6B7280", textTransform: "uppercase", letterSpacing: "0.05em", fontWeight: 600 }}>{lbl}</span>
+                </div>
+                <div style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
+                  <span style={{ fontSize: 18, fontWeight: 800, color: "#E5E7EB", fontFamily: "'JetBrains Mono', monospace" }}>{value}{unit}</span>
+                  {delta !== 0 && (
+                    <span style={{ fontSize: 10, fontWeight: 700, color: delta > 0 ? "#34D399" : "#F87171", fontFamily: "'JetBrains Mono', monospace" }}>
+                      {delta > 0 ? "+" : ""}{delta}{unit}
+                    </span>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+          {/* Chart: RAM + Disque (Go) */}
+          <div style={{ height: 180, marginBottom: 12 }}>
+            <div style={{ fontSize: 10, color: "#6B7280", marginBottom: 4, fontWeight: 600 }}>Capacité allouée (Go)</div>
             <ResponsiveContainer width="100%" height="100%">
-              <ComposedChart data={fleetEvo} margin={{ top: 6, right: 12, bottom: 0, left: -8 }}>
+              <ComposedChart data={fleetEvo} margin={{ top: 4, right: 12, bottom: 0, left: -8 }}>
+                <defs>
+                  <linearGradient id="ramArea" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor="#EC4899" stopOpacity={0.15} />
+                    <stop offset="100%" stopColor="#EC4899" stopOpacity={0} />
+                  </linearGradient>
+                  <linearGradient id="diskArea" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor="#FBBF24" stopOpacity={0.15} />
+                    <stop offset="100%" stopColor="#FBBF24" stopOpacity={0} />
+                  </linearGradient>
+                </defs>
+                <CartesianGrid stroke="rgba(255,255,255,0.05)" vertical={false} />
+                <XAxis dataKey="label" tick={{ fontSize: 9, fill: "#6B7280" }} axisLine={false} tickLine={false} />
+                <YAxis tick={{ fontSize: 9, fill: "#6B7280" }} axisLine={false} tickLine={false} unit=" Go" />
+                <Tooltip
+                  contentStyle={{ background: "#1F2937", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8, fontSize: 11 }}
+                  labelStyle={{ color: "#9CA3AF" }}
+                  formatter={(v, name) => v == null ? ["—", name] : [`${v} Go`, name]}
+                />
+                <Area type="monotone" dataKey="totalRamGb" name="RAM" stroke="none" fill="url(#ramArea)" />
+                <Area type="monotone" dataKey="totalDiskGb" name="Disque" stroke="none" fill="url(#diskArea)" />
+                <Line type="monotone" dataKey="totalRamGb" name="RAM" stroke="#EC4899" strokeWidth={2.5} dot={{ r: 3, fill: "#EC4899" }} />
+                <Line type="monotone" dataKey="totalDiskGb" name="Disque" stroke="#FBBF24" strokeWidth={2.5} dot={{ r: 3, fill: "#FBBF24" }} />
+              </ComposedChart>
+            </ResponsiveContainer>
+          </div>
+          {/* Chart: CPU cœurs + Serveurs */}
+          <div style={{ height: 140 }}>
+            <div style={{ fontSize: 10, color: "#6B7280", marginBottom: 4, fontWeight: 600 }}>Cœurs CPU & nombre de serveurs</div>
+            <ResponsiveContainer width="100%" height="100%">
+              <ComposedChart data={fleetEvo} margin={{ top: 4, right: 12, bottom: 0, left: -8 }}>
                 <CartesianGrid stroke="rgba(255,255,255,0.05)" vertical={false} />
                 <XAxis dataKey="label" tick={{ fontSize: 9, fill: "#6B7280" }} axisLine={false} tickLine={false} />
                 <YAxis yAxisId="left" tick={{ fontSize: 9, fill: "#6B7280" }} axisLine={false} tickLine={false} />
@@ -719,22 +912,15 @@ export default function CapacityPlanning({ servers: propServers }) {
                 <Tooltip
                   contentStyle={{ background: "#1F2937", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8, fontSize: 11 }}
                   labelStyle={{ color: "#9CA3AF" }}
-                  formatter={(v, name) => {
-                    if (v == null) return ["—", name];
-                    if (name === "Serveurs") return [v, name];
-                    return [`${v} Go`, name];
-                  }}
                 />
-                <Legend wrapperStyle={{ fontSize: 10 }} />
-                <Bar yAxisId="right" dataKey="serverCount" name="Serveurs" fill="rgba(156,163,175,0.2)" radius={[4, 4, 0, 0]} />
-                <Line yAxisId="left" type="monotone" dataKey="totalRamGb" name="RAM Go" stroke="#EC4899" strokeWidth={2.5} dot={{ r: 3, fill: "#EC4899" }} />
-                <Line yAxisId="left" type="monotone" dataKey="totalDiskGb" name="Disque Go" stroke="#FBBF24" strokeWidth={2.5} dot={{ r: 3, fill: "#FBBF24" }} />
-                <Line yAxisId="right" type="monotone" dataKey="totalCores" name="CPU cœurs" stroke="#818CF8" strokeWidth={2} strokeDasharray="5 3" dot={{ r: 2, fill: "#818CF8" }} />
+                <Bar yAxisId="right" dataKey="serverCount" name="Serveurs" fill="rgba(156,163,175,0.25)" radius={[3, 3, 0, 0]} />
+                <Line yAxisId="left" type="monotone" dataKey="totalCores" name="CPU cœurs" stroke="#818CF8" strokeWidth={2.5} dot={{ r: 3, fill: "#818CF8" }} />
               </ComposedChart>
             </ResponsiveContainer>
           </div>
         </div>
-      )}
+        );
+      })()}
 
       {/* ══ TIMELINE DES AJOUTS DE RESSOURCES ══ */}
       {resEvents.length > 0 && (
@@ -763,7 +949,12 @@ export default function CapacityPlanning({ servers: propServers }) {
                 }}>
                   {ev.delta > 0 ? "+" : ""}{ev.delta}{ev.unit}
                 </span>
-                <span style={{ fontSize: 10, color: "#4B5563", flexShrink: 0 }}>{ev.label}</span>
+                <span style={{
+                  fontSize: 10, fontWeight: 700, padding: "2px 8px", borderRadius: 8, flexShrink: 0,
+                  background: ev.label === "Urgent" ? "rgba(248,113,113,0.15)" : "rgba(251,191,36,0.12)",
+                  color: ev.label === "Urgent" ? "#F87171" : "#FBBF24",
+                  border: ev.label === "Urgent" ? "1px solid rgba(248,113,113,0.2)" : "1px solid rgba(251,191,36,0.2)",
+                }}>{ev.label}</span>
               </div>
             ))}
           </div>
@@ -776,6 +967,20 @@ export default function CapacityPlanning({ servers: propServers }) {
           {cardTitle(Activity, "Taux de croissance par serveur",
             <span style={{ fontSize: 10, color: "#6B7280" }}>Basé sur snapshots réels</span>
           )}
+          <div style={{ position: "relative", marginBottom: 10 }}>
+            <Search size={13} color="#6B7280" style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)" }} />
+            <input
+              type="text"
+              value={growthSearch}
+              onChange={e => setGrowthSearch(e.target.value)}
+              placeholder="Rechercher un serveur..."
+              style={{
+                width: "100%", padding: "7px 10px 7px 30px", fontSize: 11,
+                background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)",
+                borderRadius: 8, color: "#E5E7EB", outline: "none",
+              }}
+            />
+          </div>
           <div style={{ maxHeight: 280, overflowY: "auto" }}>
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11 }}>
               <thead>
@@ -790,7 +995,7 @@ export default function CapacityPlanning({ servers: propServers }) {
                 </tr>
               </thead>
               <tbody>
-                {growthRates.map(g => (
+                {growthRates.filter(g => g.name.toLowerCase().includes(growthSearch.toLowerCase())).map(g => (
                   <tr key={g.name}>
                     <td style={{ padding: "5px 10px", color: "#E5E7EB", fontWeight: 600 }}>{g.name}</td>
                     <td style={{ textAlign: "right", padding: "5px 10px", color: "#6B7280", fontFamily: "'JetBrains Mono', monospace" }}>{g.monthsTracked}</td>

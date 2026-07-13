@@ -1,4 +1,4 @@
-import { Globe, Wifi, WifiOff, Zap, Server, AlertTriangle, CheckCircle, KeyRound, Clock, Shield, Activity, Layers, AppWindow } from "lucide-react";
+import { Globe, Wifi, WifiOff, Zap, Server, AlertTriangle, CheckCircle, KeyRound, Clock, Shield, Activity, Layers, AppWindow, Cpu, MemoryStick, HardDrive } from "lucide-react";
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid } from "recharts";
 import { getStatus, STATUS } from "../constants";
 import LoginPanel from "./LoginPanel";
@@ -181,23 +181,33 @@ export default function DashboardPage({ groups = [], allUrls = [], allServers = 
 
   /* Distributions CPU / RAM / Disque par tranche */
   const TRANCHES = [
-    { label: "0–25%",   min: 0,  max: 25,  opacity: 0.35 },
-    { label: "25–50%",  min: 25, max: 50,  opacity: 0.55 },
-    { label: "50–75%",  min: 50, max: 75,  opacity: 0.75 },
-    { label: "75–90%",  min: 75, max: 90,  opacity: 0.90 },
-    { label: "90–100%", min: 90, max: 101, opacity: 1.00 },
+    { label: "0–25%",   min: 0,  max: 25,  severity: "ok",      color: "#34D399" },
+    { label: "25–50%",  min: 25, max: 50,  severity: "ok",      color: "#818CF8" },
+    { label: "50–75%",  min: 50, max: 75,  severity: "warn",    color: "#FBBF24" },
+    { label: "75–90%",  min: 75, max: 90,  severity: "alert",   color: "#FB923C" },
+    { label: "90–100%", min: 90, max: 101, severity: "crit",    color: "#F87171" },
   ];
-  const makeTranches = (key, accent) => TRANCHES.map(t => ({
+  const makeTranches = (key) => TRANCHES.map(t => ({
     ...t,
-    color: accent,
     count: allServers.filter(s => (s[key] ?? 0) >= t.min && (s[key] ?? 0) < t.max).length,
+    pct: totalServers > 0 ? Math.round(allServers.filter(s => (s[key] ?? 0) >= t.min && (s[key] ?? 0) < t.max).length / totalServers * 100) : 0,
   }));
-  const cpuTranches  = makeTranches("cpu",  "#818CF8");
-  const ramTranches  = makeTranches("ram",  "#F472B6");
-  const diskTranches = makeTranches("disk", "#FBBF24");
+  const cpuTranches  = makeTranches("cpu");
+  const ramTranches  = makeTranches("ram");
+  const diskTranches = makeTranches("disk");
   const maxCpu  = Math.max(...cpuTranches.map(t => t.count),  1);
   const maxRam  = Math.max(...ramTranches.map(t => t.count),  1);
   const maxDisk = Math.max(...diskTranches.map(t => t.count), 1);
+
+  /* Stats min / max / avg par métrique */
+  const metricStats = (key) => {
+    const vals = allServers.map(s => s[key] ?? 0).filter(v => v > 0);
+    if (!vals.length) return { min: 0, max: 0, avg: 0 };
+    return { min: Math.min(...vals), max: Math.max(...vals), avg: Math.round(vals.reduce((a, b) => a + b, 0) / vals.length) };
+  };
+  const cpuStats  = metricStats("cpu");
+  const ramStats  = metricStats("ram");
+  const diskStats = metricStats("disk");
 
   /* Groupes (non-global) */
   const groupStats = groups.filter(g => !g.isGlobal).map(g => ({
@@ -429,42 +439,87 @@ export default function DashboardPage({ groups = [], allUrls = [], allServers = 
             <Layers size={12} style={{ marginRight: 2, flexShrink: 0 }} />
             Distribution par tranche — CPU · RAM · Disque
           </SectionTitle>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 14 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 14, alignItems: "stretch" }}>
             {[
-              { label: "CPU",    tranches: cpuTranches,  maxVal: maxCpu,  accent: "#818CF8" },
-              { label: "RAM",    tranches: ramTranches,  maxVal: maxRam,  accent: "#F472B6" },
-              { label: "Disque", tranches: diskTranches, maxVal: maxDisk, accent: "#FBBF24" },
-            ].map(({ label, tranches, maxVal, accent }) => (
-              <Panel key={label} style={{ padding: "14px 16px 10px" }}>
-                <div style={{ fontSize: 11, fontWeight: 700, color: accent, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 10 }}>{label}</div>
-                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                  {tranches.map(t => {
-                    const pct = (t.count / maxVal) * 100;
-                    return (
-                      <div key={t.label} style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                        <span style={{ fontSize: 10, color: "#6B7280", width: 52, flexShrink: 0, fontFamily: "'JetBrains Mono', monospace" }}>
-                          {t.label}
-                        </span>
-                        <div style={{ flex: 1, height: 16, background: "rgba(255,255,255,0.04)", borderRadius: 4, overflow: "hidden" }}>
-                          <div style={{
-                            width: `${pct}%`, height: "100%",
-                            background: t.count > 0 ? t.color : "transparent",
-                            opacity: t.count > 0 ? t.opacity : 1,
-                            borderRadius: 4, transition: "width 0.5s ease",
-                          }} />
-                        </div>
-                        <span style={{ fontSize: 11, fontWeight: 700, color: t.count > 0 ? t.color : "#374151", opacity: t.count > 0 ? t.opacity + 0.1 : 1, fontFamily: "'JetBrains Mono', monospace", width: 26, textAlign: "right", flexShrink: 0 }}>
-                          {t.count}
-                        </span>
+              { label: "CPU",    icon: Cpu,    tranches: cpuTranches,  maxVal: maxCpu,  stats: cpuStats,  accent: "#818CF8" },
+              { label: "RAM",    icon: MemoryStick, tranches: ramTranches,  maxVal: maxRam,  stats: ramStats,  accent: "#F472B6" },
+              { label: "Disque", icon: HardDrive, tranches: diskTranches, maxVal: maxDisk, stats: diskStats, accent: "#FBBF24" },
+            ].map(({ label, icon: Icon, tranches, maxVal, stats, accent }) => {
+              const alertCount = tranches.filter(t => t.severity === "alert" || t.severity === "crit").reduce((s, t) => s + t.count, 0);
+              return (
+                <Panel key={label} style={{ padding: "0", display: "flex", flexDirection: "column", height: "100%" }}>
+                  {/* Header */}
+                  <div style={{ padding: "12px 16px", borderBottom: "1px solid rgba(255,255,255,0.06)", display: "flex", alignItems: "center", justifyContent: "space-between", flexShrink: 0 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      <div style={{ width: 26, height: 26, borderRadius: 8, background: `${accent}18`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                        <Icon size={14} color={accent} />
                       </div>
-                    );
-                  })}
-                </div>
-                <div style={{ textAlign: "center", fontSize: 9, color: "#4B5563", marginTop: 10 }}>
-                  {totalServers} serveur{totalServers > 1 ? "s" : ""}
-                </div>
-              </Panel>
-            ))}
+                      <span style={{ fontSize: 12, fontWeight: 700, color: accent, textTransform: "uppercase", letterSpacing: "0.06em" }}>{label}</span>
+                    </div>
+                    <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                      {alertCount > 0 && (
+                        <span style={{ fontSize: 10, fontWeight: 700, color: "#F87171", background: "rgba(248,113,113,0.12)", padding: "2px 8px", borderRadius: 10, border: "1px solid rgba(248,113,113,0.2)" }}>
+                          {alertCount} alerte{alertCount > 1 ? "s" : ""}
+                        </span>
+                      )}
+                      <span style={{ fontSize: 18, fontWeight: 800, color: stats.avg >= 75 ? "#F87171" : stats.avg >= 50 ? "#FBBF24" : accent, fontFamily: "'JetBrains Mono', monospace" }}>
+                        {stats.avg}%
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Tranches — single column, fills remaining height */}
+                  <div style={{ padding: "10px 16px 14px", display: "flex", flexDirection: "column", gap: 10, flex: 1, justifyContent: "space-evenly" }}>
+                    {tranches.map(t => {
+                      const barPct = (t.count / maxVal) * 100;
+                      return (
+                        <div key={t.label} style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                          <div style={{ width: 6, height: 6, borderRadius: "50%", background: t.count > 0 ? t.color : "#2D3748", flexShrink: 0, boxShadow: t.count > 0 && t.severity === "crit" ? `0 0 5px ${t.color}` : "none" }} />
+                          <span style={{ fontSize: 9, color: t.count > 0 ? "#9CA3AF" : "#4B5563", width: 42, flexShrink: 0, fontFamily: "'JetBrains Mono', monospace" }}>
+                            {t.label}
+                          </span>
+                          <div style={{ flex: 1, height: 26, background: "rgba(255,255,255,0.03)", borderRadius: 5, overflow: "hidden", position: "relative" }}>
+                            <div style={{
+                              width: `${barPct}%`, height: "100%",
+                              background: t.count > 0 ? `linear-gradient(90deg, ${t.color}88, ${t.color})` : "transparent",
+                              borderRadius: 5, transition: "width 0.5s ease",
+                              minWidth: t.count > 0 ? 12 : 0,
+                            }} />
+                            {t.count > 0 && (
+                              <span style={{ position: "absolute", right: 8, top: "50%", transform: "translateY(-50%)", fontSize: 10, fontWeight: 700, color: "#fff", fontFamily: "'JetBrains Mono', monospace" }}>
+                                {t.pct}%
+                              </span>
+                            )}
+                          </div>
+                          <span style={{ fontSize: 12, fontWeight: 700, color: t.count > 0 ? t.color : "#374151", fontFamily: "'JetBrains Mono', monospace", width: 32, textAlign: "right", flexShrink: 0 }}>
+                            {t.count > 0 ? `${t.count}` : "·"}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  {/* Footer: min / max / avg */}
+                  <div style={{ padding: "8px 16px", borderTop: "1px solid rgba(255,255,255,0.04)", display: "flex", justifyContent: "space-between", alignItems: "center", background: "rgba(255,255,255,0.015)", flexShrink: 0 }}>
+                    <div style={{ display: "flex", gap: 14 }}>
+                      <span style={{ fontSize: 9, color: "#6B7280" }}>
+                        <span style={{ color: "#4B5563" }}>min</span>{" "}
+                        <span style={{ fontWeight: 700, color: "#9CA3AF", fontFamily: "'JetBrains Mono', monospace" }}>{stats.min}%</span>
+                      </span>
+                      <span style={{ fontSize: 9, color: "#6B7280" }}>
+                        <span style={{ color: "#4B5563" }}>max</span>{" "}
+                        <span style={{ fontWeight: 700, color: stats.max >= 90 ? "#F87171" : "#9CA3AF", fontFamily: "'JetBrains Mono', monospace" }}>{stats.max}%</span>
+                      </span>
+                      <span style={{ fontSize: 9, color: "#6B7280" }}>
+                        <span style={{ color: "#4B5563" }}>avg</span>{" "}
+                        <span style={{ fontWeight: 700, color: stats.avg >= 75 ? "#F87171" : stats.avg >= 50 ? "#FBBF24" : "#9CA3AF", fontFamily: "'JetBrains Mono', monospace" }}>{stats.avg}%</span>
+                      </span>
+                    </div>
+                    <span style={{ fontSize: 9, color: "#4B5563" }}>{totalServers} serveur{totalServers > 1 ? "s" : ""}</span>
+                  </div>
+                </Panel>
+              );
+            })}
           </div>
         </div>
       )}

@@ -117,36 +117,39 @@ function renderLogin() {
 
 /* ── Dashboard Layout ── */
 let currentView = "urls";
+let sidebarCollapsed = false;
 
 function renderDashboard() {
   clearApp();
   const layout = el("div", { className: "layout" });
 
   /* Sidebar */
-  const sidebar = el("div", { className: "sidebar" },
+  const sidebar = el("div", { className: `sidebar${sidebarCollapsed ? " collapsed" : ""}` },
     el("div", { className: "sidebar-header" },
-      el("img", { src: "/g1oeil_icone_app-black.svg", alt: "G1Oeil", style: { width: "28px", height: "28px" } }),
-      el("span", {}, "G1Oeil Admin"),
+      el("button", { className: "sidebar-toggle", onclick: () => { sidebarCollapsed = !sidebarCollapsed; renderDashboard(); } }, "\u2630"),
+      !sidebarCollapsed && el("img", { src: "/g1oeil_icone_app-black.svg", alt: "G1Oeil", style: { width: "28px", height: "28px" } }),
+      !sidebarCollapsed && el("span", {}, "G1Oeil Admin"),
     ),
     el("nav", { className: "sidebar-nav" },
       ...[
-        ["urls", "🔗", "URLs & Images"],
-        ["apis", "🔌", "APIs"],
-        ["users", "👤", "Utilisateurs"],
-        ["logs", "📋", "Logs"],
+        ["urls", "\uD83D\uDD17", "URLs & Images"],
+        ["apis", "\uD83D\uDD0C", "APIs"],
+        ["users", "\uD83D\uDC64", "Utilisateurs"],
+        ["logs", "\uD83D\uDCCB", "Logs"],
       ].map(([key, icon, label]) =>
         el("button", {
           className: `nav-item ${currentView === key ? "active" : ""}`,
           onclick: () => { currentView = key; renderDashboard(); },
         },
           el("span", { className: "nav-icon" }, icon),
-          el("span", {}, label),
+          !sidebarCollapsed && el("span", {}, label),
         )
       ),
     ),
     el("div", { className: "sidebar-footer" },
-      el("div", { className: "user-info" }, `${currentUser?.username} (${currentUser?.role})`),
-      el("button", { className: "btn btn-secondary btn-sm btn-block", onclick: logout }, "Déconnexion"),
+      !sidebarCollapsed && el("div", { className: "user-info" }, `${currentUser?.username} (${currentUser?.role})`),
+      !sidebarCollapsed && el("button", { className: "btn btn-secondary btn-sm btn-block", onclick: logout }, "D\u00e9connexion"),
+      sidebarCollapsed && el("button", { className: "btn btn-secondary btn-sm btn-block", onclick: logout, title: "D\u00e9connexion" }, "\u23FB"),
     ),
   );
 
@@ -230,6 +233,29 @@ async function renderUrlsView(container) {
     );
     tableWrap.appendChild(modeCard);
 
+    /* ── Search bar ── */
+    const searchBar = el("div", { className: "search-bar" },
+      el("span", { style: { fontSize: 14, color: "var(--text-muted)" } }, "\uD83D\uDD0D"),
+      el("input", { id: "url-search", placeholder: "Rechercher par URL, nom ou mode...", oninput: (e) => {
+        const q = e.target.value.toLowerCase().trim();
+        const rows = scrollBody.querySelectorAll("tr");
+        let visible = 0;
+        rows.forEach(r => {
+          const text = r.textContent.toLowerCase();
+          const match = !q || text.includes(q);
+          r.style.display = match ? "" : "none";
+          if (match) visible++;
+        });
+        searchCount.textContent = `${visible} / ${urls.length} URL(s)`;
+      } }),
+      el("span", { id: "url-search-count", style: { fontSize: 11, color: "var(--text-dim)", whiteSpace: "nowrap" } }, `${urls.length} URL(s)`),
+    );
+    tableWrap.appendChild(searchBar);
+    const searchCount = searchBar.querySelector("#url-search-count");
+
+    /* ── Scrollable URL list ── */
+    const scrollList = el("div", { className: "scroll-list" });
+    const scrollBody = el("tbody");
     const table = el("table", {},
       el("thead", {},
         el("tr", {},
@@ -241,27 +267,43 @@ async function renderUrlsView(container) {
           el("th", {}, "Actions"),
         )
       ),
-      el("tbody", {},
-        ...urls.map(u => el("tr", {},
-          el("td", {}, String(u.id)),
-          el("td", { style: { maxWidth: "300px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, u.url),
-          el("td", {}, u.name || "—"),
-          el("td", {}, el("span", { className: `badge ${u.mode === "authenticated" ? "badge-primary" : "badge-success"}` }, u.mode)),
-          el("td", {}, String(u.steps?.length || 0)),
-          el("td", { style: { display: "flex", gap: "6px" } },
-            el("button", { className: "btn btn-secondary btn-sm", onclick: () => renderUrlModal(u) }, "Éditer"),
-            el("button", { className: "btn btn-secondary btn-sm", onclick: () => renderStepsModal(u) }, "Étapes"),
-            el("button", { className: "btn btn-secondary btn-sm", onclick: () => runCompare(u) }, "Tester"),
-            el("button", { className: "btn btn-danger btn-sm", onclick: async () => {
-              if (!confirm(`Supprimer ${u.url} ?`)) return;
-              try { await api(`/api/urls/${u.id}`, { method: "DELETE" }); toast("URL supprimée"); renderDashboard(); }
-              catch (e) { toast(e.message, "error"); }
-            } }, "Suppr."),
-          )
-        ))
+      scrollBody,
+    );
+
+    const buildRow = (u) => el("tr", {},
+      el("td", {}, String(u.id)),
+      el("td", { style: { maxWidth: "300px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, u.url),
+      el("td", {}, u.name || "—"),
+      el("td", {}, el("span", { className: `badge ${u.mode === "authenticated" ? "badge-primary" : "badge-success"}` }, u.mode)),
+      el("td", {}, String(u.steps?.length || 0)),
+      el("td", { style: { display: "flex", gap: "6px" } },
+        el("button", { className: "btn btn-secondary btn-sm", onclick: () => renderUrlModal(u) }, "Éditer"),
+        el("button", { className: "btn btn-secondary btn-sm", onclick: () => renderStepsModal(u) }, "Étapes"),
+        el("button", { className: "btn btn-secondary btn-sm", onclick: () => runCompare(u) }, "Tester"),
+        el("button", { className: "btn btn-danger btn-sm", onclick: async () => {
+          if (!confirm(`Supprimer ${u.url} ?`)) return;
+          try { await api(`/api/urls/${u.id}`, { method: "DELETE" }); toast("URL supprimée"); renderDashboard(); }
+          catch (e) { toast(e.message, "error"); }
+        } }, "Suppr."),
       )
     );
-    tableWrap.appendChild(table);
+    urls.forEach(u => scrollBody.appendChild(buildRow(u)));
+    scrollList.appendChild(table);
+    tableWrap.appendChild(scrollList);
+
+    /* ── Scroll-to-top button ── */
+    const scrollTopBtn = el("button", {
+      className: "btn btn-secondary btn-sm",
+      style: { position: "fixed", right: "32px", bottom: "32px", zIndex: 50, borderRadius: "50%", width: "40px", height: "40px", padding: "0", display: "none", alignItems: "center", justifyContent: "center", fontSize: "18px" },
+      onclick: () => scrollList.scrollTo({ top: 0, behavior: "smooth" }),
+    }, "\u2191");
+    scrollList.addEventListener("scroll", () => {
+      scrollTopBtn.style.display = scrollList.scrollTop > 100 ? "flex" : "none";
+    });
+    document.body.appendChild(scrollTopBtn);
+    /* Cleanup on re-render */
+    const observer = new MutationObserver(() => { scrollTopBtn.remove(); observer.disconnect(); });
+    observer.observe(document.getElementById("app"), { childList: true, subtree: false });
   } catch (e) {
     tableWrap.appendChild(el("div", { className: "card" }, `Erreur: ${e.message}`));
   }
@@ -496,7 +538,10 @@ function renderCompareResult(url, result) {
 async function renderApisView(container) {
   container.appendChild(el("div", { className: "main-header" },
     el("h2", {}, "Gestion des APIs"),
-    el("button", { className: "btn btn-primary", onclick: () => renderApiModal(null) }, "+ Ajouter une API"),
+    el("div", { style: { display: "flex", gap: "8px" } },
+      el("button", { className: "btn btn-primary", onclick: () => renderApiModal(null) }, "+ Ajouter une API"),
+      el("button", { className: "btn btn-secondary", onclick: () => renderApiKeyModal() }, "+ Cl\u00e9 d'acc\u00e8s externe"),
+    ),
   ));
 
   const tableWrap = el("div", { className: "table-wrap" });
@@ -504,38 +549,132 @@ async function renderApisView(container) {
 
   try {
     const apis = await api("/api/apis");
-    if (!apis.length) {
-      tableWrap.appendChild(el("div", { className: "card", style: { textAlign: "center", color: "var(--text-muted)" } }, "Aucune API configurée"));
-      return;
-    }
-    const table = el("table", {},
-      el("thead", {}, el("tr", {},
-        el("th", {}, "ID"), el("th", {}, "Nom"), el("th", {}, "Base URL"),
-        el("th", {}, "Auth"), el("th", {}, "Actions"),
-      )),
-      el("tbody", {},
-        ...apis.map(a => el("tr", {},
-          el("td", {}, String(a.id)),
-          el("td", {}, a.name),
-          el("td", { style: { maxWidth: "300px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, a.base_url),
-          el("td", {}, el("span", { className: "badge badge-primary" }, a.auth_type)),
-          el("td", { style: { display: "flex", gap: "6px" } },
-            el("button", { className: "btn btn-secondary btn-sm", onclick: () => renderApiModal(a) }, "Éditer"),
-            el("button", { className: "btn btn-secondary btn-sm", onclick: async () => {
-              toast("Test en cours...", "success");
-              try { const r = await api(`/api/apis/${a.id}/test`, { method: "POST" }); toast(r.ok ? `OK (${r.status})` : `Échec: ${r.error || r.status}`, r.ok ? "success" : "error"); }
-              catch (e) { toast(e.message, "error"); }
-            } }, "Tester"),
-            el("button", { className: "btn btn-danger btn-sm", onclick: async () => {
-              if (!confirm(`Supprimer ${a.name} ?`)) return;
-              try { await api(`/api/apis/${a.id}`, { method: "DELETE" }); toast("API supprimée"); renderDashboard(); }
-              catch (e) { toast(e.message, "error"); }
-            } }, "Suppr."),
-          )
-        ))
-      )
+
+    /* ── KPIs ── */
+    const total = apis.length;
+    const byAuth = {};
+    apis.forEach(a => { byAuth[a.auth_type] = (byAuth[a.auth_type] || 0) + 1; });
+    const kpiData = [
+      { label: "Total APIs", value: total, color: "#6366F1", icon: "\uD83D\uDD0C" },
+      { label: "OAuth2", value: byAuth["oauth2"] || 0, color: "#F59E0B", icon: "\uD83D\uDD11" },
+      { label: "Bearer", value: byAuth["bearer"] || 0, color: "#10B981", icon: "\uD83D\uDD10" },
+      { label: "API Key", value: byAuth["api_key"] || 0, color: "#EC4899", icon: "\uD83D\uDD11" },
+      { label: "Aucune", value: byAuth["none"] || 0, color: "#6B7280", icon: "\u26A0\uFE0F" },
+    ];
+    const kpiRow = el("div", { style: { display: "grid", gridTemplateColumns: `repeat(${kpiData.length}, 1fr)`, gap: "12px", marginBottom: "16px" } },
+      ...kpiData.map(k => el("div", { className: "card", style: { padding: "14px 16px", display: "flex", flexDirection: "column", gap: "6px" } },
+        el("div", { style: { display: "flex", alignItems: "center", justifyContent: "space-between" } },
+          el("span", { style: { fontSize: 11, color: "var(--text-muted)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.04em" } }, k.label),
+          el("span", { style: { fontSize: 16 } }, k.icon),
+        ),
+        el("span", { style: { fontSize: 24, fontWeight: 800, color: k.color, fontFamily: "monospace" } }, String(k.value)),
+      ))
     );
-    tableWrap.appendChild(table);
+    tableWrap.appendChild(kpiRow);
+
+    /* ── Search bar ── */
+    const apiSearchBody = el("tbody");
+    const searchCount = el("span", { style: { fontSize: 11, color: "var(--text-dim)", whiteSpace: "nowrap" } }, `${apis.length} API(s)`);
+    const searchBar = el("div", { className: "search-bar" },
+      el("span", { style: { fontSize: 14, color: "var(--text-muted)" } }, "\uD83D\uDD0D"),
+      el("input", { placeholder: "Rechercher par nom, URL ou type d'auth...", oninput: (e) => {
+        const q = e.target.value.toLowerCase().trim();
+        const rows = apiSearchBody.querySelectorAll("tr");
+        let visible = 0;
+        rows.forEach(r => {
+          const text = r.textContent.toLowerCase();
+          const match = !q || text.includes(q);
+          r.style.display = match ? "" : "none";
+          if (match) visible++;
+        });
+        searchCount.textContent = `${visible} / ${apis.length} API(s)`;
+      } }),
+      searchCount,
+    );
+    tableWrap.appendChild(searchBar);
+
+    /* ── APIs table in scrollable container ── */
+    if (!apis.length) {
+      tableWrap.appendChild(el("div", { className: "card", style: { textAlign: "center", color: "var(--text-muted)" } }, "Aucune API configur\u00e9e"));
+    } else {
+      const scrollList = el("div", { className: "scroll-list" });
+      const table = el("table", {},
+        el("thead", {}, el("tr", {},
+          el("th", {}, "ID"), el("th", {}, "Nom"), el("th", {}, "Base URL"),
+          el("th", {}, "Auth"), el("th", {}, "Cr\u00e9\u00e9e"), el("th", {}, "Actions"),
+        )),
+        apiSearchBody,
+      );
+      apis.forEach(a => apiSearchBody.appendChild(el("tr", {},
+        el("td", {}, String(a.id)),
+        el("td", { style: { fontWeight: 600 } }, a.name),
+        el("td", { style: { maxWidth: "300px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, a.base_url),
+        el("td", {}, el("span", { className: `badge ${a.auth_type === "oauth2" ? "badge-warning" : a.auth_type === "none" ? "badge-danger" : "badge-primary"}` }, a.auth_type)),
+        el("td", { style: { fontSize: 11, fontFamily: "monospace", whiteSpace: "nowrap" } }, fmtDateShort(a.created_at)),
+        el("td", { style: { display: "flex", gap: "6px" } },
+          el("button", { className: "btn btn-secondary btn-sm", onclick: () => renderApiModal(a) }, "\u00C9diter"),
+          el("button", { className: "btn btn-secondary btn-sm", onclick: async () => {
+            toast("Test en cours...", "success");
+            try { const r = await api(`/api/apis/${a.id}/test`, { method: "POST" }); toast(r.ok ? `OK (${r.status})` : `\u00C9chec: ${r.error || r.status}`, r.ok ? "success" : "error"); }
+            catch (e) { toast(e.message, "error"); }
+          } }, "Tester"),
+          el("button", { className: "btn btn-secondary btn-sm", onclick: () => {
+            navigator.clipboard.writeText(a.base_url).then(() => toast("URL copi\u00e9e"));
+          } }, "Copier"),
+          el("button", { className: "btn btn-danger btn-sm", onclick: async () => {
+            if (!confirm(`Supprimer ${a.name} ?`)) return;
+            try { await api(`/api/apis/${a.id}`, { method: "DELETE" }); toast("API supprim\u00e9e"); renderDashboard(); }
+            catch (e) { toast(e.message, "error"); }
+          } }, "Suppr."),
+        )
+      )));
+      scrollList.appendChild(table);
+      tableWrap.appendChild(scrollList);
+    }
+
+    /* ── External API Keys section ── */
+    tableWrap.appendChild(el("div", { style: { marginTop: "20px", marginBottom: "8px", fontSize: 14, fontWeight: 700, color: "var(--text)" } }, "\uD83D\uDD11 Cl\u00e9s d'acc\u00e8s externe"));
+    tableWrap.appendChild(el("p", { style: { fontSize: 12, color: "var(--text-muted)", marginBottom: "12px" } }, "Permettez \u00e0 une application externe de se connecter \u00e0 G1Oeil via une cl\u00e9 API. Utilisez l'endpoint POST /api/api-keys/auth avec le header X-API-Key pour l'authentification."));
+
+    try {
+      const keys = await api("/api/api-keys");
+      if (!keys.length) {
+        tableWrap.appendChild(el("div", { className: "card", style: { textAlign: "center", color: "var(--text-muted)" } }, "Aucune cl\u00e9 d'acc\u00e8s configur\u00e9e"));
+      } else {
+        const keysScroll = el("div", { className: "scroll-list", style: { maxHeight: "300px" } });
+        const keysTable = el("table", {},
+          el("thead", {}, el("tr", {},
+            el("th", {}, "ID"), el("th", {}, "Application"), el("th", {}, "Description"),
+            el("th", {}, "Permissions"), el("th", {}, "Statut"), el("th", {}, "Derni\u00e8re utilisation"), el("th", {}, "Actions"),
+          )),
+          el("tbody", {},
+            ...keys.map(k => el("tr", {},
+              el("td", {}, String(k.id)),
+              el("td", { style: { fontWeight: 600 } }, k.app_name),
+              el("td", { style: { maxWidth: "200px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "var(--text-muted)" } }, k.description || "—"),
+              el("td", {}, el("span", { className: `badge ${k.permissions === "read" ? "badge-primary" : "badge-warning"}` }, k.permissions)),
+              el("td", {}, el("span", { className: `badge ${k.is_active ? "badge-success" : "badge-danger"}` }, k.is_active ? "Active" : "D\u00e9sactiv\u00e9e")),
+              el("td", { style: { fontSize: 11, fontFamily: "monospace", whiteSpace: "nowrap" } }, fmtDate(k.last_used)),
+              el("td", { style: { display: "flex", gap: "6px" } },
+                el("button", { className: "btn btn-secondary btn-sm", onclick: async () => {
+                  try { await api(`/api/api-keys/${k.id}`, { method: "PUT", body: JSON.stringify({ is_active: !k.is_active }) }); toast(k.is_active ? "Cl\u00e9 d\u00e9sactiv\u00e9e" : "Cl\u00e9 activ\u00e9e"); renderDashboard(); }
+                  catch (e) { toast(e.message, "error"); }
+                } }, k.is_active ? "D\u00e9sactiver" : "Activer"),
+                el("button", { className: "btn btn-danger btn-sm", onclick: async () => {
+                  if (!confirm(`R\u00e9voquer d\u00e9finitivement la cl\u00e9 de ${k.app_name} ?`)) return;
+                  try { await api(`/api/api-keys/${k.id}`, { method: "DELETE" }); toast("Cl\u00e9 r\u00e9voqu\u00e9e"); renderDashboard(); }
+                  catch (e) { toast(e.message, "error"); }
+                } }, "R\u00e9voquer"),
+              )
+            ))
+          )
+        );
+        keysScroll.appendChild(keysTable);
+        tableWrap.appendChild(keysScroll);
+      }
+    } catch (e) {
+      tableWrap.appendChild(el("div", { className: "card" }, `Erreur cl\u00e9s API: ${e.message}`));
+    }
   } catch (e) {
     tableWrap.appendChild(el("div", { className: "card" }, `Erreur: ${e.message}`));
   }
@@ -624,6 +763,59 @@ function renderApiModal(apiCfg) {
         } catch (e) { toast(e.message, "error"); }
       } }, "Enregistrer"),
       el("button", { className: "btn btn-secondary", onclick: () => overlay.remove() }, "Annuler"),
+    ),
+  );
+  overlay.appendChild(modal);
+  document.body.appendChild(overlay);
+}
+
+/* ── API Key Modal (generate new key for external app) ── */
+function renderApiKeyModal() {
+  const overlay = el("div", { className: "modal-overlay" });
+  const modal = el("div", { className: "modal", style: { maxWidth: "520px" } },
+    el("div", { className: "modal-header" },
+      el("h3", {}, "Cr\u00e9er une cl\u00e9 d'acc\u00e8s externe"),
+      el("button", { className: "modal-close", onclick: () => overlay.remove() }, "\u00D7"),
+    ),
+    el("p", { style: { fontSize: 12, color: "var(--text-muted)", marginBottom: "16px" } }, "Cette cl\u00e9 permet \u00e0 une application externe de s'authentifier aupr\u00e8s de l'API G1Oeil. La cl\u00e9 ne sera affich\u00e9e qu'une seule fois."),
+    el("div", { className: "form-group" },
+      el("label", {}, "Nom de l'application *"),
+      el("input", { id: "ak-appname", placeholder: "Mon Application" }),
+    ),
+    el("div", { className: "form-group" },
+      el("label", {}, "Description"),
+      el("input", { id: "ak-desc", placeholder: "Acc\u00e8s en lecture aux URLs" }),
+    ),
+    el("div", { className: "form-group" },
+      el("label", {}, "Permissions"),
+      el("select", { id: "ak-perms" },
+        el("option", { value: "read" }, "Lecture seule (GET)"),
+        el("option", { value: "readwrite" }, "Lecture + \u00E9criture (GET, POST, PUT, DELETE)"),
+      ),
+    ),
+    el("div", { id: "ak-result", style: { display: "none" } }),
+    el("div", { style: { display: "flex", gap: "10px", marginTop: "20px" } },
+      el("button", { className: "btn btn-primary", onclick: async () => {
+        const app_name = document.getElementById("ak-appname").value.trim();
+        if (!app_name) { toast("Nom requis", "error"); return; }
+        const description = document.getElementById("ak-desc").value.trim();
+        const permissions = document.getElementById("ak-perms").value;
+        try {
+          const result = await api("/api/api-keys", { method: "POST", body: JSON.stringify({ app_name, description, permissions }) });
+          const resultDiv = document.getElementById("ak-result");
+          resultDiv.style.display = "block";
+          resultDiv.innerHTML = "";
+          resultDiv.appendChild(el("div", { className: "api-key-box" },
+            el("code", {}, result.key),
+            el("button", { className: "btn btn-secondary btn-sm", onclick: () => {
+              navigator.clipboard.writeText(result.key).then(() => toast("Cl\u00e9 copi\u00e9e"));
+            } }, "Copier"),
+          ));
+          resultDiv.appendChild(el("p", { style: { fontSize: 11, color: "var(--warning)", marginTop: "8px" } }, "\u26A0\uFE0F Conservez cette cl\u00e9 en lieu s\u00fbr. Elle ne sera plus affich\u00e9e."));
+          toast("Cl\u00e9 d'acc\u00e8s cr\u00e9\u00e9e");
+        } catch (e) { toast(e.message, "error"); }
+      } }, "G\u00e9n\u00e9rer la cl\u00e9"),
+      el("button", { className: "btn btn-secondary", onclick: () => { overlay.remove(); renderDashboard(); } }, "Fermer"),
     ),
   );
   overlay.appendChild(modal);

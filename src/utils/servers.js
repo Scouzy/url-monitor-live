@@ -651,7 +651,7 @@ export function topConsumers(servers, metric, n = 5) {
 }
 
 /* Mois (label) où un serveur franchit le seuil, selon sa projection. null si jamais */
-function saturationMonth(server, metric, threshold = 90) {
+export function saturationMonth(server, metric, threshold = 90) {
   const hit = server.monthly.find((m, i) => i >= 5 && m[metric] >= threshold);
   return hit ? hit.month : null;
 }

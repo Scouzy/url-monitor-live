@@ -418,6 +418,15 @@ function itcarePlugin() {
     'creationTime','creationUser','comment',
   ]);
 
+  /* Normalise le path ITCare → /compute/instances
+     r.path peut être "/compute/instances/Windows/Server2022" mais les endpoints
+     de détail/storage/snapshots/monitoring attendent "/compute/instances/{id}/..." */
+  function normalizePath(p) {
+    if (!p) return '/compute/instances';
+    const m = String(p).match(/^\/compute\/instances/);
+    return m ? '/compute/instances' : p;
+  }
+
   /* Champs confirmés via DevTools sur GET /compute/instances/{internalResourceId} :
      ram, cpu, storage, backup{backupSystem,size,type,lastDate}, backupPolicyDetails{backups,policies},
      patchParty{excluded,exclusionReason,patchGroup,patchDate,patchTag}, network, loadbalancers,
@@ -429,8 +438,9 @@ function itcarePlugin() {
   /* Sonde GET {path}/{internalResourceId} sur le 1er item pour détecter les champs supplémentaires
      confirmé via DevTools : GET /compute/instances/{internalResourceId} (path vient de la liste) */
   async function probeDetailEndpoint(token, path, id) {
+    const np = normalizePath(path);
     try {
-      const r = await fetch(`${API_BASE}${path}/${id}`, {
+      const r = await fetch(`${API_BASE}${np}/${id}`, {
         headers: { 'Authorization': `Bearer ${token}` },
         signal: AbortSignal.timeout(6000),
       });
@@ -463,8 +473,8 @@ function itcarePlugin() {
       await Promise.all(result.slice(i, i + BATCH).map(async (r, bi) => {
         try {
           const id = r.internalResourceId || r.id;
-          const path = r.path || '/compute/instances';
-          const res = await fetch(`${API_BASE}${path}/${id}`, {
+          const np = normalizePath(r.path);
+          const res = await fetch(`${API_BASE}${np}/${id}`, {
             headers: { 'Authorization': `Bearer ${token}` },
             signal: AbortSignal.timeout(8000),
           });
@@ -495,14 +505,15 @@ function itcarePlugin() {
       await Promise.all(result.slice(i, i + BATCH).map(async (r, bi) => {
         try {
           const id = r.internalResourceId || r.id;
-          const path = r.path || '/compute/instances';
-          const res = await fetch(`${API_BASE}${path}/${id}/storage`, {
+          const np = normalizePath(r.path);
+          const res = await fetch(`${API_BASE}${np}/${id}/storage`, {
             headers: { 'Authorization': `Bearer ${token}` },
             signal: AbortSignal.timeout(8000),
           });
-          if (!res.ok) return;
+          if (!res.ok) { if (i + bi === 0 || bi === 0) console.log(`\x1b[33m[ITCare]\x1b[0m Storage ${res.status} pour ${r.name} (${np}/${id}/storage)`); return; }
           const data = await res.json();
           if (data && Array.isArray(data.fileSystems)) { result[i + bi] = { ...result[i + bi], _storage: data }; found++; }
+          else if (data) { result[i + bi] = { ...result[i + bi], _storage: data }; found++; console.log(`\x1b[33m[ITCare]\x1b[0m ${r.name}: storage reçu sans fileSystems, clés:`, Object.keys(data).join(', ')); }
         } catch {}
       }));
     }
@@ -521,8 +532,8 @@ function itcarePlugin() {
       await Promise.all(result.slice(i, i + BATCH).map(async (r, bi) => {
         try {
           const id = r.internalResourceId || r.id;
-          const path = r.path || '/compute/instances';
-          const res = await fetch(`${API_BASE}${path}/${id}/snapshots`, {
+          const np = normalizePath(r.path);
+          const res = await fetch(`${API_BASE}${np}/${id}/snapshots`, {
             headers: { 'Authorization': `Bearer ${token}` },
             signal: AbortSignal.timeout(8000),
           });

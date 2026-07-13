@@ -7,6 +7,7 @@ import { existsSync } from "node:fs";
 import authRoutes from "./routes/auth.js";
 import urlRoutes from "./routes/urls.js";
 import apiRoutes from "./routes/apis.js";
+import apiKeyRoutes from "./routes/apiKeys.js";
 import compareRoutes from "./routes/compare.js";
 import auditRoutes from "./routes/audit.js";
 import { audit } from "./auditLog.js";
@@ -24,6 +25,7 @@ app.use(express.urlencoded({ extended: true }));
 app.use("/api/auth", authRoutes);
 app.use("/api/urls", urlRoutes);
 app.use("/api/apis", apiRoutes);
+app.use("/api/api-keys", apiKeyRoutes);
 app.use("/api/compare", compareRoutes);
 app.use("/api/audit", auditRoutes);
 

@@ -151,31 +151,37 @@ function itcareToRow(r) {
   const patchExclusionReason = patch.exclusionReason || "";
 
   /* ── Stockage détaillé — confirmé via GET /compute/instances/{id}/storage → r._storage ── */
-  const fileSystems = r._storage?.fileSystems || [];
+  const _storage = r._storage || {};
+  const fileSystems = _storage.fileSystems || _storage.disks || _storage.volumes || [];
   const volumesJson = fileSystems.length > 0 ? JSON.stringify(fileSystems.map(fs => {
-    const total = fs.sizeOf, free = fs.free;
-    const used  = (total != null && free != null) ? Math.round((total - free) * 100) / 100 : null;
-    const pct   = (total && used != null) ? Math.round((used / total) * 100) : null;
-    return { mount: fs.mountingPoint || "", total, used, free, pct };
+    const total = fs.sizeOf ?? fs.size ?? fs.total ?? fs.capacity ?? null;
+    const free  = fs.free ?? fs.available ?? fs.freeSpace ?? null;
+    const used  = (total != null && free != null) ? Math.round((total - free) * 100) / 100 : (fs.used ?? fs.usedSpace ?? null);
+    const pct   = (total && used != null) ? Math.round((used / total) * 100) : (fs.pct ?? fs.percentage ?? null);
+    return { mount: fs.mountingPoint || fs.mount || fs.path || fs.device || "", total, used, free, pct };
   })) : "";
-  const storageConfiguredGb = r._storage?.totalSizeFileSystems;
+  const storageConfiguredGb = _storage.totalSizeFileSystems ?? _storage.totalSize ?? null;
   const storageUsedGb = fileSystems.length > 0
-    ? Math.round(fileSystems.reduce((s, fs) => s + (fs.sizeOf - fs.free), 0) * 100) / 100
+    ? Math.round(fileSystems.reduce((s, fs) => s + ((fs.sizeOf ?? fs.size ?? fs.total ?? 0) - (fs.free ?? fs.available ?? 0)), 0) * 100) / 100
     : null;
 
   /* ── Utilisation Disque (%) — Windows : volume C: | Linux : total global (sum used / sum total) ── */
   const isWindows = /windows/i.test(osType) || /windows/i.test(path);
   let diskUsagePct = null;
   if (fileSystems.length > 0) {
-    const pctOf = (fs) => (fs.sizeOf ? Math.round(((fs.sizeOf - fs.free) / fs.sizeOf) * 100) : null);
+    const pctOf = (fs) => {
+      const t = fs.sizeOf ?? fs.size ?? fs.total ?? 0;
+      const f = fs.free ?? fs.available ?? 0;
+      return t > 0 ? Math.round(((t - f) / t) * 100) : null;
+    };
     if (isWindows) {
-      const cDrive = fileSystems.find(fs => /^c[:\\/]*$/i.test(String(fs.mountingPoint || "").trim()));
+      const cDrive = fileSystems.find(fs => /^c[:\\/]*$/i.test(String(fs.mountingPoint || fs.mount || "").trim()));
       diskUsagePct = cDrive ? pctOf(cDrive) : pctOf(fileSystems[0]);
     } else {
       /* Linux : total global = (sum sizeOf - sum free) / sum sizeOf
          = la barre agrégée affichée en haut de la section Volumes (ex: 418.99/626.66 → 67%) */
-      const totalSizeOf = fileSystems.reduce((s, fs) => s + (fs.sizeOf || 0), 0);
-      const totalFree   = fileSystems.reduce((s, fs) => s + (fs.free   || 0), 0);
+      const totalSizeOf = fileSystems.reduce((s, fs) => s + (fs.sizeOf ?? fs.size ?? fs.total ?? 0), 0);
+      const totalFree   = fileSystems.reduce((s, fs) => s + (fs.free ?? fs.available ?? 0), 0);
       diskUsagePct = totalSizeOf > 0 ? Math.round(((totalSizeOf - totalFree) / totalSizeOf) * 100) : null;
     }
   }
