@@ -3,7 +3,7 @@ import {
   Cpu, MemoryStick, HardDrive, TrendingUp, AlertTriangle,
   Layers, Eye, Flame, Trophy, Lightbulb, AppWindow,
   X, CheckCircle, ClipboardList, GitBranch, Network, Activity,
-  Database, Server, Zap, ArrowUpCircle, ArrowDownCircle, Gauge, Search,
+  Database, Server, Zap, ArrowUpCircle, ArrowDownCircle, Gauge, Search, FileSpreadsheet,
 } from "lucide-react";
 import {
   ResponsiveContainer, ComposedChart, Line, XAxis, YAxis, Tooltip,
@@ -18,6 +18,7 @@ import {
 import { ServerDetail } from "./ServersView";
 import { loadImpacts } from "../utils/appImpactStorage";
 import { makeTodo, loadTodos, saveTodos } from "../utils/todoStorage";
+import { exportRecommendationsExcel } from "../utils/exportData";
 import { makeWorkflow, makeStep, loadWorkflows, saveWorkflows } from "../utils/workflowStorage";
 
 const METRICS = [
@@ -795,7 +796,11 @@ export default function CapacityPlanning({ servers: propServers }) {
 
       {/* Recommandations */}
       <div style={{ ...card, border: recos.some(r => r.severity === "critical") ? "1px solid rgba(248,113,113,0.3)" : card.border }}>
-        {cardTitle(Lightbulb, `Recommandations automatiques (${recos.length})`)}
+        {cardTitle(Lightbulb, `Recommandations automatiques (${recos.length})`,
+          <button onClick={() => exportRecommendationsExcel(servers, recos)} style={{ display: "flex", alignItems: "center", gap: 4, padding: "4px 10px", borderRadius: 7, background: "rgba(52,211,153,0.1)", border: "1px solid rgba(52,211,153,0.2)", color: "#34D399", fontSize: 10, fontWeight: 600, cursor: "pointer" }}>
+            <FileSpreadsheet size={12} /> Export Excel
+          </button>
+        )}
         {recos.length === 0 ? (
           <div style={{ padding: "20px 0", textAlign: "center", fontSize: 12, color: "#34D399" }}>
             ✓ Aucune action requise — la capacité est saine

@@ -12,6 +12,7 @@ import { loadImpacts } from "../utils/appImpactStorage";
 import { loadTodos } from "../utils/todoStorage";
 import { loadVpsAgents, saveVpsAgents, makeVpsAgent, fetchVpsMetrics } from "../utils/vpsAgents";
 import { patchServerMetrics } from "../utils/servers";
+import BackendPanel from "./BackendPanel";
 
 /* ── helpers UI ── */
 const card = { background: "rgba(255,255,255,0.025)", border: "1px solid rgba(255,255,255,0.07)", borderRadius: 14, overflow: "hidden" };
@@ -380,6 +381,9 @@ export default function SettingsPage({
           )}
         </div>
       </div>
+
+      {/* ── Intégration backend (scheduler, notifications, backup, metrics) ── */}
+      <BackendPanel allUrls={allUrls} />
 
       {/* ── À propos ── */}
       <div style={card}>

@@ -1,7 +1,10 @@
-import { Globe, Wifi, WifiOff, Zap, Server, AlertTriangle, CheckCircle, KeyRound, Clock, Shield, Activity, Layers, AppWindow, Cpu, MemoryStick, HardDrive } from "lucide-react";
+import { useState } from "react";
+import { Globe, Wifi, WifiOff, Zap, Server, AlertTriangle, CheckCircle, KeyRound, Clock, Shield, Activity, Layers, AppWindow, Cpu, MemoryStick, HardDrive, FileSpreadsheet, FileText, LayoutGrid, Eye, EyeOff } from "lucide-react";
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid } from "recharts";
 import { getStatus, STATUS } from "../constants";
 import LoginPanel from "./LoginPanel";
+import { exportServersExcel, exportUrlsExcel, exportPdfReport } from "../utils/exportData";
+import { loadWidgetConfig, saveWidgetConfig, isWidgetVisible } from "../utils/dashboardConfig";
 
 /* ── Helpers ──────────────────────────────────────────────── */
 function getDomain(url) {
@@ -114,6 +117,14 @@ function SourceBadge({ server }) {
 /* ── Composant principal ────────────────────────────────────── */
 export default function DashboardPage({ groups = [], allUrls = [], allServers = [], incidentLog = [], capacitySettings = {} }) {
   const isUp = u => { const s = getStatus(u); return s === STATUS.ONLINE || s === STATUS.SLOW; };
+  const [widgetConfig, setWidgetConfig] = useState(() => loadWidgetConfig());
+  const [customizing, setCustomizing] = useState(false);
+  const vis = (id) => isWidgetVisible(widgetConfig, id);
+  const toggleWidget = (id) => {
+    const next = widgetConfig.map(w => w.id === id ? { ...w, visible: !w.visible } : w);
+    setWidgetConfig(next);
+    saveWidgetConfig(next);
+  };
 
   /* Stats URLs */
   const totalUrls    = allUrls.length;
@@ -237,10 +248,44 @@ export default function DashboardPage({ groups = [], allUrls = [], allServers = 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 26, paddingBottom: 24 }}>
 
-      {/* ── Zone d'authentification ── */}
-      <div style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", gap: 10 }}>
+      {/* ── Zone d'authentification + exports ── */}
+      <div style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+        <button onClick={() => setCustomizing(c => !c)} title="Personnaliser le dashboard" style={{ display: "flex", alignItems: "center", gap: 5, padding: "6px 12px", borderRadius: 8, background: customizing ? "rgba(99,102,241,0.18)" : "rgba(255,255,255,0.04)", border: `1px solid ${customizing ? "rgba(99,102,241,0.35)" : "rgba(255,255,255,0.08)"}`, color: customizing ? "#A5B4FC" : "#9CA3AF", fontSize: 11, fontWeight: 600, cursor: "pointer" }}>
+          <LayoutGrid size={13} /> Personnaliser
+        </button>
+        <button onClick={() => exportUrlsExcel(groups)} title="Exporter les URLs en Excel" style={{ display: "flex", alignItems: "center", gap: 5, padding: "6px 12px", borderRadius: 8, background: "rgba(52,211,153,0.1)", border: "1px solid rgba(52,211,153,0.2)", color: "#34D399", fontSize: 11, fontWeight: 600, cursor: "pointer" }}>
+          <FileSpreadsheet size={13} /> URLs
+        </button>
+        <button onClick={() => exportServersExcel(allServers)} title="Exporter les serveurs en Excel" style={{ display: "flex", alignItems: "center", gap: 5, padding: "6px 12px", borderRadius: 8, background: "rgba(129,140,248,0.1)", border: "1px solid rgba(129,140,248,0.2)", color: "#818CF8", fontSize: 11, fontWeight: 600, cursor: "pointer" }}>
+          <FileSpreadsheet size={13} /> Serveurs
+        </button>
+        <button onClick={() => exportPdfReport({ groups, allUrls, allServers, incidentLog })} title="Générer un rapport PDF" style={{ display: "flex", alignItems: "center", gap: 5, padding: "6px 12px", borderRadius: 8, background: "rgba(248,113,113,0.1)", border: "1px solid rgba(248,113,113,0.2)", color: "#F87171", fontSize: 11, fontWeight: 600, cursor: "pointer" }}>
+          <FileText size={13} /> Rapport PDF
+        </button>
         <LoginPanel groups={groups} />
       </div>
+
+      {/* ── Panneau de personnalisation ── */}
+      {customizing && (
+        <div style={{ background: "rgba(99,102,241,0.05)", border: "1px solid rgba(99,102,241,0.15)", borderRadius: 12, padding: "14px 18px" }}>
+          <div style={{ fontSize: 12, fontWeight: 600, color: "#A5B4FC", marginBottom: 10, display: "flex", alignItems: "center", gap: 6 }}>
+            <LayoutGrid size={14} /> Widgets affichés sur le dashboard
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(250px, 1fr))", gap: 8 }}>
+            {widgetConfig.map(w => (
+              <button key={w.id} onClick={() => toggleWidget(w.id)} style={{
+                display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", borderRadius: 8, cursor: "pointer",
+                background: w.visible ? "rgba(52,211,153,0.08)" : "rgba(255,255,255,0.03)",
+                border: `1px solid ${w.visible ? "rgba(52,211,153,0.2)" : "rgba(255,255,255,0.06)"}`,
+                color: w.visible ? "#34D399" : "#6B7280", fontSize: 11, fontWeight: 600, textAlign: "left",
+              }}>
+                {w.visible ? <Eye size={13} /> : <EyeOff size={13} />}
+                {w.label}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* ── Indicateur live ── */}
       {lastUrlCheck > 0 && (
@@ -251,7 +296,7 @@ export default function DashboardPage({ groups = [], allUrls = [], allServers = 
       )}
 
       {/* ══ LIGNE 1 : Vue d'ensemble URL ══════════════════════════ */}
-      <div style={{ display: "flex", gap: 20, alignItems: "stretch", flexWrap: "wrap" }}>
+      {vis("url-overview") && <div style={{ display: "flex", gap: 20, alignItems: "stretch", flexWrap: "wrap" }}>
 
         {/* Donut + uptime */}
         <Panel style={{ padding: "18px 20px", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", minWidth: 180, gap: 8 }}>
@@ -298,13 +343,13 @@ export default function DashboardPage({ groups = [], allUrls = [], allServers = 
           <KpiCard icon={AlertTriangle} label="Alertes serv." value={serverAlerts} accent={serverAlerts > 0 ? "#F87171" : "#34D399"} />
           <KpiCard icon={Activity}   label="Pannes total"  value={pannes}                                      accent="#FB923C" />
         </div>
-      </div>
+      </div>}
 
       {/* ══ LIGNE 2 : Serveurs + Événements récents ══════════════ */}
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20 }}>
 
         {/* Serveurs */}
-        <div>
+        {vis("server-resources") && <div>
           <SectionTitle>Ressources serveurs</SectionTitle>
           {totalServers === 0 ? (
             <Panel><EmptyPanel icon={Server} text="Aucun serveur enregistré" /></Panel>
@@ -337,10 +382,10 @@ export default function DashboardPage({ groups = [], allUrls = [], allServers = 
               </div>
             </Panel>
           )}
-        </div>
+        </div>}
 
         {/* Événements récents */}
-        <div>
+        {vis("recent-events") && <div>
           <SectionTitle>Événements récents</SectionTitle>
           <Panel>
             {recentEventsGrouped.length === 0 ? (
@@ -373,7 +418,7 @@ export default function DashboardPage({ groups = [], allUrls = [], allServers = 
               );
             })}
           </Panel>
-        </div>
+        </div>}
       </div>
 
       {/* ══ BANNIÈRE DONNÉES DÉMO ════════════════════════════ */}
@@ -386,7 +431,7 @@ export default function DashboardPage({ groups = [], allUrls = [], allServers = 
       )}
 
       {/* ══ TOP 5 CONSOMMATEURS ════════════════════════════════ */}
-      {totalServers > 0 && (
+      {vis("top-consumers") && totalServers > 0 && (
         <div>
           <SectionTitle>Top 5 — Consommateurs de ressources</SectionTitle>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 16 }}>
@@ -433,7 +478,7 @@ export default function DashboardPage({ groups = [], allUrls = [], allServers = 
       )}
 
       {/* ══ DISTRIBUTIONS CPU / RAM / DISQUE ════════════════════ */}
-      {totalServers > 0 && (
+      {vis("distributions") && totalServers > 0 && (
         <div>
           <SectionTitle>
             <Layers size={12} style={{ marginRight: 2, flexShrink: 0 }} />
@@ -528,7 +573,7 @@ export default function DashboardPage({ groups = [], allUrls = [], allServers = 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 20 }}>
 
         {/* Groupes */}
-        <div>
+        {vis("group-stats") && <div>
           <SectionTitle>Groupes</SectionTitle>
           <Panel>
             {groupStats.length === 0 ? (
@@ -557,10 +602,10 @@ export default function DashboardPage({ groups = [], allUrls = [], allServers = 
               </div>
             ))}
           </Panel>
-        </div>
+        </div>}
 
         {/* SSL */}
-        <div>
+        {vis("ssl-expiring") && <div>
           <SectionTitle>SSL — Expirations ≤30j</SectionTitle>
           <Panel>
             {sslExpiring.length === 0 ? (
@@ -580,10 +625,10 @@ export default function DashboardPage({ groups = [], allUrls = [], allServers = 
               );
             })}
           </Panel>
-        </div>
+        </div>}
 
         {/* Top pannes */}
-        <div>
+        {vis("incidents-top") && <div>
           <SectionTitle>Top pannes — URLs</SectionTitle>
           <Panel>
             {topIncidents.length === 0 ? (
@@ -597,7 +642,7 @@ export default function DashboardPage({ groups = [], allUrls = [], allServers = 
               </PanelRow>
             ))}
           </Panel>
-        </div>
+        </div>}
 
         {/* Stats incidents */}
         <div>
@@ -628,7 +673,7 @@ export default function DashboardPage({ groups = [], allUrls = [], allServers = 
       </div>
 
       {/* ══ LIGNE 4 : URLs les plus lentes ══════════════════════ */}
-      {topSlowChart.length > 0 && (
+      {vis("top-slow") && topSlowChart.length > 0 && (
         <div>
           <SectionTitle>URLs les plus lentes (temps de réponse)</SectionTitle>
           <Panel style={{ padding: "16px 10px 10px" }}>

@@ -2,7 +2,7 @@ import { useState, useRef } from "react";
 import {
   ChevronLeft, ChevronRight, Menu, Plus, Folder, FolderOpen,
   Trash2, Activity, Check, X, Globe, Download, Upload,
-  Server, BarChart3, MonitorCheck, AlertTriangle, Settings, ClipboardList, GitBranch, Network, LayoutDashboard, Wrench,
+  Server, BarChart3, MonitorCheck, AlertTriangle, Settings, ClipboardList, GitBranch, Network, LayoutDashboard, Wrench, ShieldCheck, Map, GitCompare, Search, Sun, Moon,
 } from "lucide-react";
 import { getStatus, STATUS } from "../constants";
 import { importGroupsJson, importGroupsArray } from "../utils/storage";
@@ -12,6 +12,7 @@ import { loadSnapshots } from "../utils/snapshots";
 import { loadCapacitySettings, saveCapacitySettings } from "../utils/capacitySettings";
 import { loadImpacts, saveImpacts } from "../utils/appImpactStorage";
 import { loadLog, saveLog } from "./IncidentLog";
+import { getTheme, toggleTheme } from "../utils/theme";
 
 function ExportImportButtons({ groups, onImport }) {
   const fileRef = useRef(null);
@@ -124,6 +125,10 @@ const MODULES = [
   { id: "monitor",    label: "Surveillance",      Icon: MonitorCheck },
   { id: "servers",    label: "Serveurs",          Icon: Server },
   { id: "capacity",   label: "Capacity Planning", Icon: BarChart3 },
+  { id: "uptime",     label: "SLA / Uptime",      Icon: Activity },
+  { id: "ssl",        label: "Certificats SSL",   Icon: ShieldCheck },
+  { id: "geo",        label: "Carte serveurs",    Icon: Map },
+  { id: "snapshot-diff", label: "Diff Snapshots", Icon: GitCompare },
   { id: "impacts",    label: "Impacts App.",      Icon: Network },
   { id: "journal",    label: "Journal",           Icon: AlertTriangle },
   { id: "workflows",  label: "Workflows",         Icon: GitBranch },
@@ -131,6 +136,23 @@ const MODULES = [
   { id: "intervention", label: "Intervention",       Icon: Wrench },
   { id: "parametres", label: "Paramètres",        Icon: Settings },
 ];
+
+function ThemeToggle() {
+  const [theme, setThemeState] = useState(() => getTheme());
+  const handleToggle = () => {
+    const next = toggleTheme();
+    setThemeState(next);
+  };
+  return (
+    <button onClick={handleToggle} title={theme === "dark" ? "Passer en mode clair" : "Passer en mode sombre"} style={{
+      display: "flex", alignItems: "center", justifyContent: "center", width: 28, height: 28, borderRadius: 7,
+      background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)",
+      color: theme === "dark" ? "#FBBF24" : "#818CF8", cursor: "pointer", flexShrink: 0,
+    }}>
+      {theme === "dark" ? <Sun size={13} /> : <Moon size={13} />}
+    </button>
+  );
+}
 
 export default function Sidebar({ groups, activeGroupId, onSelect, onAddGroup, onRemoveGroup, onRenameGroup, open, onToggle, checkingIds, totalUrls, totalOnline, onImport, activeModule = "monitor", onSelectModule, journalBadge = 0, todoBadge = 0, serversBadge = 0, agentsBadge = 0, isMobile = false }) {
   const [adding, setAdding] = useState(false);
@@ -396,7 +418,10 @@ export default function Sidebar({ groups, activeGroupId, onSelect, onAddGroup, o
       {showFull && (
         <div style={{ padding: "10px 12px", borderTop: "1px solid rgba(255,255,255,0.06)", display: "flex", flexDirection: "column", gap: 6 }}>
           <ExportImportButtons groups={groups} onImport={onImport} />
-          <div style={{ fontSize: 10, color: "#374151", textAlign: "center" }}>Double-clic pour renommer</div>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+            <div style={{ fontSize: 10, color: "#374151" }}>Double-clic pour renommer</div>
+            <ThemeToggle />
+          </div>
         </div>
       )}
     </aside>

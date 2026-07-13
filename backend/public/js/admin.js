@@ -134,6 +134,11 @@ function renderDashboard() {
       ...[
         ["urls", "\uD83D\uDD17", "URLs & Images"],
         ["apis", "\uD83D\uDD0C", "APIs"],
+        ["scheduler", "\u23F0", "Scheduler"],
+        ["notifications", "\uD83D\uDD14", "Notifications"],
+        ["metrics", "\uD83D\uDCCA", "M\u00E9triques Serveurs"],
+        ["ssl", "\uD83D\uDD12", "Certificats SSL"],
+        ["system", "\uD83D\uDDA0", "Syst\u00E8me"],
         ["users", "\uD83D\uDC64", "Utilisateurs"],
         ["logs", "\uD83D\uDCCB", "Logs"],
       ].map(([key, icon, label]) =>
@@ -163,6 +168,11 @@ function renderDashboard() {
   else if (currentView === "apis") renderApisView(main);
   else if (currentView === "users") renderUsersView(main);
   else if (currentView === "logs") renderLogsView(main);
+  else if (currentView === "scheduler") renderSchedulerView(main);
+  else if (currentView === "notifications") renderNotificationsView(main);
+  else if (currentView === "metrics") renderMetricsView(main);
+  else if (currentView === "ssl") renderSslView(main);
+  else if (currentView === "system") renderSystemView(main);
 }
 
 /* ── URLs View ── */
@@ -1052,6 +1062,490 @@ async function renderLogsView(container) {
     document.getElementById("check-logs").innerHTML = "";
     document.getElementById("check-logs").appendChild(el("p", { style: { color: "var(--danger)" } }, `Erreur: ${e.message}`));
   }
+}
+
+/* ── Scheduler View ── */
+async function renderSchedulerView(container) {
+  container.innerHTML = "";
+  container.appendChild(el("div", { className: "main-header" },
+    el("h2", {}, "Scheduler — Checks automatisés"),
+    el("button", { className: "btn btn-secondary", onclick: () => renderSchedulerView(container) }, "Actualiser"),
+  ));
+
+  const wrap = el("div", {});
+  container.appendChild(wrap);
+
+  try {
+    const schedules = await api("/api/scheduler/");
+    const urls = await api("/api/urls");
+
+    /* KPIs */
+    const enabled = schedules.filter(s => s.enabled).length;
+    const online = schedules.filter(s => s.last_status === "online").length;
+    const offline = schedules.filter(s => s.last_status === "offline").length;
+
+    wrap.appendChild(el("div", { style: { display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "12px", marginBottom: "16px" } },
+      el("div", { className: "card", style: { padding: "14px 16px" } }, el("div", { style: { fontSize: 11, color: "var(--text-muted)", textTransform: "uppercase" } }, "Schedules"), el("div", { style: { fontSize: 24, fontWeight: 800, color: "var(--primary-hover)", fontFamily: "monospace" } }, String(schedules.length))),
+      el("div", { className: "card", style: { padding: "14px 16px" } }, el("div", { style: { fontSize: 11, color: "var(--text-muted)", textTransform: "uppercase" } }, "Actifs"), el("div", { style: { fontSize: 24, fontWeight: 800, color: "var(--success)", fontFamily: "monospace" } }, String(enabled))),
+      el("div", { className: "card", style: { padding: "14px 16px" } }, el("div", { style: { fontSize: 11, color: "var(--text-muted)", textTransform: "uppercase" } }, "En ligne"), el("div", { style: { fontSize: 24, fontWeight: 800, color: "var(--success)", fontFamily: "monospace" } }, String(online))),
+      el("div", { className: "card", style: { padding: "14px 16px" } }, el("div", { style: { fontSize: 11, color: "var(--text-muted)", textTransform: "uppercase" } }, "Hors ligne"), el("div", { style: { fontSize: 24, fontWeight: 800, color: "var(--danger)", fontFamily: "monospace" } }, String(offline))),
+    ));
+
+    /* Add schedule form */
+    const unscheduled = urls.filter(u => !schedules.some(s => s.url_config_id === u.id));
+    if (unscheduled.length > 0) {
+      const select = el("select", { style: { background: "var(--bg-input)", border: "1px solid var(--border)", borderRadius: "8px", color: "var(--text)", fontSize: "13px", padding: "8px 12px", flex: 1 } },
+        el("option", { value: "" }, "— Sélectionner une URL —"),
+        ...unscheduled.map(u => el("option", { value: u.id }, u.url)),
+      );
+      const intervalSel = el("select", { style: { background: "var(--bg-input)", border: "1px solid var(--border)", borderRadius: "8px", color: "var(--text)", fontSize: "13px", padding: "8px 12px" } },
+        ...[[60, "1min"], [120, "2min"], [300, "5min"], [600, "10min"], [900, "15min"], [1800, "30min"], [3600, "1h"]].map(([v, l]) => el("option", { value: v }, l)),
+      );
+      wrap.appendChild(el("div", { className: "card", style: { display: "flex", gap: "10px", alignItems: "center" } },
+        el("span", { style: { fontSize: 13, color: "var(--text-muted)", fontWeight: 600 } }, "Ajouter un schedule:"),
+        select,
+        intervalSel,
+        el("button", { className: "btn btn-primary btn-sm", onclick: async () => {
+          if (!select.value) return;
+          try { await api(`/api/scheduler/url/${select.value}`, { method: "POST", body: JSON.stringify({ interval_seconds: +intervalSel.value, enabled: true }) }); toast("Schedule créé"); renderSchedulerView(container); } catch (e) { toast(e.message, "error"); }
+        } }, "Créer"),
+      ));
+    }
+
+    /* Schedules table */
+    if (schedules.length === 0) {
+      wrap.appendChild(el("div", { className: "card", style: { textAlign: "center", color: "var(--text-muted)" } }, "Aucun schedule configuré"));
+    } else {
+      const tbody = schedules.map(s => el("tr", {},
+        el("td", { style: { fontFamily: "monospace", fontSize: 12 } }, s.url || `#${s.url_config_id}`),
+        el("td", {}, s.interval_seconds >= 60 ? `${s.interval_seconds / 60}min` : `${s.interval_seconds}s`),
+        el("td", {}, el("span", { className: `badge ${s.enabled ? "badge-success" : "badge-warning"}` }, s.enabled ? "Actif" : "Pause")),
+        el("td", {}, s.last_status ? el("span", { className: `badge ${s.last_status === "online" ? "badge-success" : "badge-danger"}` }, s.last_status) : "—"),
+        el("td", {}, s.last_response_time ? `${s.last_response_time}ms` : "—"),
+        el("td", { style: { fontSize: 11, fontFamily: "monospace" } }, fmtDate(s.last_check_at)),
+        el("td", { style: { display: "flex", gap: "6px" } },
+          el("button", { className: "btn btn-secondary btn-sm", onclick: async () => {
+            try { await api(`/api/scheduler/${s.id}`, { method: "PUT", body: JSON.stringify({ interval_seconds: s.interval_seconds, enabled: !s.enabled }) }); toast(s.enabled ? "Pause" : "Activé"); renderSchedulerView(container); } catch (e) { toast(e.message, "error"); }
+          } }, s.enabled ? "Pause" : "Activer"),
+          el("button", { className: "btn btn-danger btn-sm", onclick: async () => {
+            try { await api(`/api/scheduler/${s.id}`, { method: "DELETE" }); toast("Supprimé"); renderSchedulerView(container); } catch (e) { toast(e.message, "error"); }
+          } }, "Supprimer"),
+        ),
+      ));
+      wrap.appendChild(el("div", { className: "scroll-list" },
+        el("table", {},
+          el("thead", {}, el("tr", {},
+            el("th", {}, "URL"), el("th", {}, "Intervalle"), el("th", {}, "Statut"), el("th", {}, "Dernier check"), el("th", {}, "Réponse"), el("th", {}, "Date"), el("th", {}, "Actions"),
+          )),
+          el("tbody", {}, ...tbody),
+        ),
+      ));
+    }
+
+    /* Recent results */
+    try {
+      const results = await api("/api/scheduler/results?limit=30");
+      if (results.length > 0) {
+        wrap.appendChild(el("h3", { style: { marginTop: "20px", marginBottom: "10px", fontSize: 15 } }, "30 derniers checks backend"));
+        wrap.appendChild(el("div", { className: "scroll-list", style: { maxHeight: 300 } },
+          el("table", {},
+            el("thead", {}, el("tr", {}, el("th", {}, "URL"), el("th", {}, "Statut"), el("th", {}, "Temps"), el("th", {}, "Erreur"), el("th", {}, "Date"))),
+            el("tbody", {}, ...results.map(r => el("tr", {},
+              el("td", { style: { fontFamily: "monospace", fontSize: 11 } }, r.url),
+              el("td", {}, el("span", { className: `badge ${r.status === "online" ? "badge-success" : "badge-danger"}` }, r.status)),
+              el("td", {}, r.response_time ? `${r.response_time}ms` : "—"),
+              el("td", { style: { fontSize: 11, color: "var(--danger)" } }, r.error_message || "—"),
+              el("td", { style: { fontSize: 11, fontFamily: "monospace" } }, fmtDate(r.checked_at)),
+            ))),
+          ),
+        ));
+      }
+    } catch {}
+  } catch (e) {
+    wrap.appendChild(el("div", { className: "card", style: { color: "var(--danger)" } }, `Erreur: ${e.message}`));
+  }
+}
+
+/* ── Notifications View ── */
+async function renderNotificationsView(container) {
+  container.innerHTML = "";
+  container.appendChild(el("div", { className: "main-header" },
+    el("h2", {}, "Canaux de notification"),
+    el("button", { className: "btn btn-primary", onclick: () => renderNotifModal(container) }, "+ Ajouter un canal"),
+  ));
+
+  const wrap = el("div", {});
+  container.appendChild(wrap);
+
+  try {
+    const channels = await api("/api/notifications/channels");
+    if (channels.length === 0) {
+      wrap.appendChild(el("div", { className: "card", style: { textAlign: "center", color: "var(--text-muted)" } }, "Aucun canal configuré. Ajoutez un webhook Slack/Teams ou un email."));
+      return;
+    }
+
+    const tbody = channels.map(ch => {
+      const cfg = typeof ch.config === "string" ? JSON.parse(ch.config) : ch.config;
+      return el("tr", {},
+        el("td", { style: { fontWeight: 600 } }, ch.name),
+        el("td", {}, el("span", { className: `badge ${ch.type === "webhook" ? "badge-primary" : "badge-success"}` }, ch.type)),
+        el("td", { style: { fontFamily: "monospace", fontSize: 11, color: "var(--text-muted)" } }, cfg.url || cfg.to || "—"),
+        el("td", { style: { fontSize: 11 } }, ch.triggers),
+        el("td", {}, el("span", { className: `badge ${ch.enabled ? "badge-success" : "badge-warning"}` }, ch.enabled ? "Actif" : "Désactivé")),
+        el("td", { style: { display: "flex", gap: "6px" } },
+          el("button", { className: "btn btn-secondary btn-sm", onclick: async () => {
+            try { await api("/api/notifications/test", { method: "POST", body: JSON.stringify({ channelId: ch.id }) }); toast("Test envoyé"); } catch (e) { toast(e.message, "error"); }
+          } }, "Tester"),
+          el("button", { className: "btn btn-secondary btn-sm", onclick: async () => {
+            try { await api(`/api/notifications/channels/${ch.id}`, { method: "PUT", body: JSON.stringify({ name: ch.name, type: ch.type, config: cfg, triggers: ch.triggers, enabled: !ch.enabled }) }); toast(ch.enabled ? "Désactivé" : "Activé"); renderNotificationsView(container); } catch (e) { toast(e.message, "error"); }
+          } }, ch.enabled ? "Désactiver" : "Activer"),
+          el("button", { className: "btn btn-danger btn-sm", onclick: async () => {
+            try { await api(`/api/notifications/channels/${ch.id}`, { method: "DELETE" }); toast("Supprimé"); renderNotificationsView(container); } catch (e) { toast(e.message, "error"); }
+          } }, "Supprimer"),
+        ),
+      );
+    });
+    wrap.appendChild(el("div", { className: "scroll-list" },
+      el("table", {},
+        el("thead", {}, el("tr", {}, el("th", {}, "Nom"), el("th", {}, "Type"), el("th", {}, "Cible"), el("th", {}, "Déclencheurs"), el("th", {}, "Statut"), el("th", {}, "Actions"))),
+        el("tbody", {}, ...tbody),
+      ),
+    ));
+  } catch (e) {
+    wrap.appendChild(el("div", { className: "card", style: { color: "var(--danger)" } }, `Erreur: ${e.message}`));
+  }
+}
+
+function renderNotifModal(container) {
+  const overlay = el("div", { className: "modal-overlay", onclick: e => { if (e.target === overlay) overlay.remove(); } });
+  const typeSel = el("select", { style: { background: "var(--bg-input)", border: "1px solid var(--border)", borderRadius: "8px", color: "var(--text)", fontSize: "13px", padding: "9px 12px", width: "100%" } },
+    el("option", { value: "webhook" }, "Webhook (Slack/Teams)"),
+    el("option", { value: "email" }, "Email"),
+  );
+  const urlInput = el("input", { placeholder: "https://hooks.slack.com/services/...", style: { width: "100%" } });
+  typeSel.addEventListener("change", () => {
+    urlInput.placeholder = typeSel.value === "webhook" ? "https://hooks.slack.com/services/..." : "admin@example.com";
+  });
+  overlay.appendChild(el("div", { className: "modal" },
+    el("div", { className: "modal-header" }, el("h3", {}, "Nouveau canal de notification"), el("button", { className: "modal-close", onclick: () => overlay.remove() }, "×")),
+    el("div", { className: "form-group" }, el("label", {}, "Nom"), el("input", { id: "notif-name", placeholder: "Slack Alertes" })),
+    el("div", { className: "form-group" }, el("label", {}, "Type"), typeSel),
+    el("div", { className: "form-group" }, el("label", {}, typeSel.value === "webhook" ? "URL du webhook" : "Email destinataire"), urlInput),
+    el("div", { className: "form-group" }, el("label", {}, "Déclencheurs"), el("input", { id: "notif-triggers", value: "status_change,check_fail", style: { width: "100%" } })),
+    el("button", { className: "btn btn-primary btn-block", onclick: async () => {
+      const name = document.getElementById("notif-name").value;
+      if (!name) return toast("Nom requis", "error");
+      const config = typeSel.value === "webhook" ? { url: urlInput.value } : { to: urlInput.value };
+      try { await api("/api/notifications/channels", { method: "POST", body: JSON.stringify({ name, type: typeSel.value, config, triggers: document.getElementById("notif-triggers").value }) }); toast("Canal créé"); overlay.remove(); renderNotificationsView(container); } catch (e) { toast(e.message, "error"); }
+    } }, "Créer"),
+  ));
+  document.body.appendChild(overlay);
+}
+
+/* ── Server Metrics View ── */
+async function renderMetricsView(container) {
+  container.innerHTML = "";
+  container.appendChild(el("div", { className: "main-header" },
+    el("h2", {}, "Métriques serveurs"),
+    el("button", { className: "btn btn-secondary", onclick: () => renderMetricsView(container) }, "Actualiser"),
+  ));
+
+  const wrap = el("div", {});
+  container.appendChild(wrap);
+
+  try {
+    const latest = await api("/api/servers/metrics/latest");
+    if (latest.length === 0) {
+      wrap.appendChild(el("div", { className: "card", style: { textAlign: "center", color: "var(--text-muted)" } }, "Aucune métrique reçue. Les agents VPS ou le frontend enverront les données automatiquement."));
+      return;
+    }
+
+    /* KPIs */
+    const avgCpu = (latest.reduce((s, m) => s + (m.cpu || 0), 0) / latest.length).toFixed(1);
+    const avgRam = (latest.reduce((s, m) => s + (m.ram || 0), 0) / latest.length).toFixed(1);
+    const avgDisk = (latest.reduce((s, m) => s + (m.disk || 0), 0) / latest.length).toFixed(1);
+    const alerts = latest.filter(m => (m.cpu > 80) || (m.ram > 80) || (m.disk > 80)).length;
+
+    wrap.appendChild(el("div", { style: { display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "12px", marginBottom: "16px" } },
+      el("div", { className: "card", style: { padding: "14px 16px" } }, el("div", { style: { fontSize: 11, color: "var(--text-muted)", textTransform: "uppercase" } }, "Serveurs"), el("div", { style: { fontSize: 24, fontWeight: 800, color: "var(--primary-hover)", fontFamily: "monospace" } }, String(latest.length))),
+      el("div", { className: "card", style: { padding: "14px 16px" } }, el("div", { style: { fontSize: 11, color: "var(--text-muted)", textTransform: "uppercase" } }, "CPU moyen"), el("div", { style: { fontSize: 24, fontWeight: 800, color: avgCpu > 80 ? "var(--danger)" : "var(--success)", fontFamily: "monospace" } }, `${avgCpu}%`)),
+      el("div", { className: "card", style: { padding: "14px 16px" } }, el("div", { style: { fontSize: 11, color: "var(--text-muted)", textTransform: "uppercase" } }, "RAM moyenne"), el("div", { style: { fontSize: 24, fontWeight: 800, color: avgRam > 80 ? "var(--danger)" : "var(--success)", fontFamily: "monospace" } }, `${avgRam}%`)),
+      el("div", { className: "card", style: { padding: "14px 16px" } }, el("div", { style: { fontSize: 11, color: "var(--text-muted)", textTransform: "uppercase" } }, "Alertes (>80%)"), el("div", { style: { fontSize: 24, fontWeight: 800, color: alerts > 0 ? "var(--danger)" : "var(--success)", fontFamily: "monospace" } }, String(alerts))),
+    ));
+
+    /* Table */
+    const tbody = latest.map(m => {
+      const cpuColor = m.cpu > 80 ? "var(--danger)" : m.cpu > 60 ? "var(--warning)" : "var(--success)";
+      const ramColor = m.ram > 80 ? "var(--danger)" : m.ram > 60 ? "var(--warning)" : "var(--success)";
+      const diskColor = m.disk > 80 ? "var(--danger)" : m.disk > 60 ? "var(--warning)" : "var(--success)";
+      return el("tr", {},
+        el("td", { style: { fontWeight: 600 } }, m.server_name),
+        el("td", { style: { fontFamily: "monospace", fontWeight: 700, color: cpuColor } }, m.cpu != null ? `${m.cpu}%` : "—"),
+        el("td", { style: { fontFamily: "monospace", fontWeight: 700, color: ramColor } }, m.ram != null ? `${m.ram}%` : "—"),
+        el("td", { style: { fontFamily: "monospace", fontWeight: 700, color: diskColor } }, m.disk != null ? `${m.disk}%` : "—"),
+        el("td", {}, m.cores || "—"),
+        el("td", {}, m.ram_gb ? `${m.ram_gb} Go` : "—"),
+        el("td", { style: { fontSize: 11, fontFamily: "monospace" } }, fmtDate(m.ts)),
+        el("td", {},
+          el("button", { className: "btn btn-secondary btn-sm", onclick: async () => {
+            try { const hist = await api(`/api/servers/${encodeURIComponent(m.server_name)}/history?limit=50`); renderMetricsHistoryModal(m.server_name, hist); } catch (e) { toast(e.message, "error"); }
+          } }, "Historique"),
+        ),
+      );
+    });
+    wrap.appendChild(el("div", { className: "scroll-list" },
+      el("table", {},
+        el("thead", {}, el("tr", {}, el("th", {}, "Serveur"), el("th", {}, "CPU"), el("th", {}, "RAM"), el("th", {}, "Disque"), el("th", {}, "Cores"), el("th", {}, "RAM Go"), el("th", {}, "Timestamp"), el("th", {}, "Actions"))),
+        el("tbody", {}, ...tbody),
+      ),
+    ));
+  } catch (e) {
+    wrap.appendChild(el("div", { className: "card", style: { color: "var(--danger)" } }, `Erreur: ${e.message}`));
+  }
+}
+
+function renderMetricsHistoryModal(name, history) {
+  const overlay = el("div", { className: "modal-overlay", onclick: e => { if (e.target === overlay) overlay.remove(); } });
+  overlay.appendChild(el("div", { className: "modal", style: { maxWidth: 700 } },
+    el("div", { className: "modal-header" }, el("h3", {}, `Historique — ${name}`), el("button", { className: "modal-close", onclick: () => overlay.remove() }, "×")),
+    el("div", { className: "scroll-list", style: { maxHeight: 400 } },
+      el("table", {},
+        el("thead", {}, el("tr", {}, el("th", {}, "Date"), el("th", {}, "CPU"), el("th", {}, "RAM"), el("th", {}, "Disque"))),
+        el("tbody", {}, ...history.map(h => el("tr", {},
+          el("td", { style: { fontSize: 11, fontFamily: "monospace" } }, fmtDate(h.ts)),
+          el("td", { style: { fontFamily: "monospace" } }, h.cpu != null ? `${h.cpu}%` : "—"),
+          el("td", { style: { fontFamily: "monospace" } }, h.ram != null ? `${h.ram}%` : "—"),
+          el("td", { style: { fontFamily: "monospace" } }, h.disk != null ? `${h.disk}%` : "—"),
+        ))),
+      ),
+    ),
+  ));
+  document.body.appendChild(overlay);
+}
+
+/* ── SSL View ── */
+let sslAutoSynced = false;
+
+async function renderSslView(container) {
+  container.innerHTML = "";
+  container.appendChild(el("div", { className: "main-header" },
+    el("h2", {}, "Certificats SSL"),
+    el("div", { style: { display: "flex", gap: "8px" } },
+      el("button", { className: "btn btn-secondary", onclick: () => renderSslView(container) }, "Actualiser"),
+      el("button", { className: "btn btn-primary", onclick: async () => {
+        try { toast("Vérification en cours..."); const r = await api("/api/ssl/check-all", { method: "POST" }); toast(`${r.checked} certificat(s) vérifié(s)`); sslAutoSynced = true; renderSslView(container); } catch (e) { toast(e.message, "error"); }
+      } }, "Vérifier tout"),
+    ),
+  ));
+
+  const wrap = el("div", {});
+  container.appendChild(wrap);
+
+  try {
+    /* Charger certs ET urls en parallèle */
+    const [certs, urls] = await Promise.all([
+      api("/api/ssl/"),
+      api("/api/urls"),
+    ]);
+
+    /* URLs HTTPS depuis url_configs */
+    const httpsUrls = (urls || []).filter(u => u.url && u.url.startsWith("https://"));
+    const certMap = {};
+    (certs || []).forEach(c => { certMap[c.url] = c; });
+
+    /* Auto-sync: si pas de certs mais des URLs HTTPS existent, lancer check-all une fois */
+    if (sslAutoSynced === false && (certs || []).length === 0 && httpsUrls.length > 0) {
+      sslAutoSynced = true;
+      wrap.appendChild(el("div", { className: "card", style: { textAlign: "center", color: "var(--text-muted)", padding: "20px" } },
+        `Synchronisation de ${httpsUrls.length} URL(s) HTTPS en cours...`,
+      ));
+      try {
+        await api("/api/ssl/check-all", { method: "POST" });
+        toast(`${httpsUrls.length} certificat(s) synchronisé(s)`);
+        renderSslView(container);
+        return;
+      } catch (e) {
+        toast(e.message, "error");
+      }
+    }
+
+    /* KPIs — compter sur les URLs HTTPS, pas seulement les certs vérifiés */
+    const total = httpsUrls.length;
+    const valid = httpsUrls.filter(u => certMap[u.url]?.days_left > 30).length;
+    const warning = httpsUrls.filter(u => { const d = certMap[u.url]?.days_left; return d != null && d <= 30 && d > 7; }).length;
+    const critical = httpsUrls.filter(u => { const d = certMap[u.url]?.days_left; return d != null && d <= 7 && d > 0; }).length;
+    const expired = httpsUrls.filter(u => { const d = certMap[u.url]?.days_left; return d != null && d <= 0; }).length;
+    const unchecked = httpsUrls.filter(u => !certMap[u.url]).length;
+
+    wrap.appendChild(el("div", { style: { display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: "12px", marginBottom: "16px" } },
+      el("div", { className: "card", style: { padding: "14px 16px" } }, el("div", { style: { fontSize: 11, color: "var(--text-muted)", textTransform: "uppercase" } }, "URLs HTTPS"), el("div", { style: { fontSize: 24, fontWeight: 800, color: "var(--primary-hover)", fontFamily: "monospace" } }, String(total))),
+      el("div", { className: "card", style: { padding: "14px 16px" } }, el("div", { style: { fontSize: 11, color: "var(--text-muted)", textTransform: "uppercase" } }, "Valides (>30j)"), el("div", { style: { fontSize: 24, fontWeight: 800, color: "var(--success)", fontFamily: "monospace" } }, String(valid))),
+      el("div", { className: "card", style: { padding: "14px 16px" } }, el("div", { style: { fontSize: 11, color: "var(--text-muted)", textTransform: "uppercase" } }, "Attention (≤30j)"), el("div", { style: { fontSize: 24, fontWeight: 800, color: "var(--warning)", fontFamily: "monospace" } }, String(warning))),
+      el("div", { className: "card", style: { padding: "14px 16px" } }, el("div", { style: { fontSize: 11, color: "var(--text-muted)", textTransform: "uppercase" } }, "Critiques (≤7j)"), el("div", { style: { fontSize: 24, fontWeight: 800, color: "var(--danger)", fontFamily: "monospace" } }, String(critical + expired))),
+      el("div", { className: "card", style: { padding: "14px 16px" } }, el("div", { style: { fontSize: 11, color: "var(--text-muted)", textTransform: "uppercase" } }, "Non vérifiés"), el("div", { style: { fontSize: 24, fontWeight: 800, color: unchecked > 0 ? "var(--warning)" : "var(--success)", fontFamily: "monospace" } }, String(unchecked))),
+    ));
+
+    /* Table — toutes les URLs HTTPS, avec ou sans cert */
+    if (total === 0) {
+      wrap.appendChild(el("div", { className: "card", style: { textAlign: "center", color: "var(--text-muted)" } }, "Aucune URL HTTPS dans la base. Ajoutez des URLs en https:// dans l'onglet \"URLs & Images\"."));
+      return;
+    }
+
+    const sortedUrls = httpsUrls
+      .map(u => {
+        const c = certMap[u.url];
+        return {
+          url: u.url,
+          name: u.name || "",
+          issuer: c?.issuer || null,
+          expiry_date: c?.expiry_date || null,
+          days_left: c?.days_left ?? null,
+          status: c?.status || "unchecked",
+          last_checked: c?.last_checked || null,
+        };
+      })
+      .sort((a, b) => (a.days_left ?? -1) - (b.days_left ?? -1));
+
+    const tbody = sortedUrls.map(item => {
+      const color = item.days_left == null ? "var(--text-muted)" : item.days_left <= 0 ? "var(--danger)" : item.days_left <= 7 ? "var(--danger)" : item.days_left <= 30 ? "var(--warning)" : "var(--success)";
+      const badgeClass = item.status === "valid" ? "badge-success" : item.status === "warning" ? "badge-warning" : item.status === "critical" || item.status === "expired" ? "badge-danger" : "badge-primary";
+      const badgeLabel = item.status === "valid" ? "Valide" : item.status === "warning" ? "Attention" : item.status === "critical" ? "Critique" : item.status === "expired" ? "Expiré" : "Non vérifié";
+      return el("tr", {},
+        el("td", { style: { fontFamily: "monospace", fontSize: 12 } }, item.url),
+        el("td", { style: { fontSize: 11, color: "var(--text-muted)" } }, item.name || "—"),
+        el("td", { style: { fontSize: 11 } }, item.issuer || "—"),
+        el("td", { style: { fontSize: 11, fontFamily: "monospace" } }, item.expiry_date ? fmtDateShort(item.expiry_date) : "—"),
+        el("td", { style: { fontFamily: "monospace", fontWeight: 700, color } }, item.days_left != null ? `${item.days_left}j` : "—"),
+        el("td", {}, el("span", { className: `badge ${badgeClass}` }, badgeLabel)),
+        el("td", { style: { fontSize: 11, fontFamily: "monospace" } }, item.last_checked ? fmtDate(item.last_checked) : "—"),
+        el("td", {},
+          el("button", { className: "btn btn-secondary btn-sm", onclick: async () => {
+            try { toast("Vérification..."); await api("/api/ssl/check", { method: "POST", body: JSON.stringify({ url: item.url }) }); toast("Certificat vérifié"); renderSslView(container); } catch (e) { toast(e.message, "error"); }
+          } }, "Vérifier"),
+        ),
+      );
+    });
+    wrap.appendChild(el("div", { className: "scroll-list" },
+      el("table", {},
+        el("thead", {}, el("tr", {}, el("th", {}, "URL"), el("th", {}, "Nom"), el("th", {}, "Émetteur"), el("th", {}, "Expiration"), el("th", {}, "Jours restants"), el("th", {}, "Statut"), el("th", {}, "Dernière vérif."), el("th", {}, "Action"))),
+        el("tbody", {}, ...tbody),
+      ),
+    ));
+  } catch (e) {
+    wrap.appendChild(el("div", { className: "card", style: { color: "var(--danger)" } }, `Erreur: ${e.message}`));
+  }
+}
+
+/* ── System View (Backup + Observabilité) ── */
+async function renderSystemView(container) {
+  container.innerHTML = "";
+  container.appendChild(el("div", { className: "main-header" },
+    el("h2", {}, "Système — Backup & Observabilité"),
+    el("button", { className: "btn btn-secondary", onclick: () => renderSystemView(container) }, "Actualiser"),
+  ));
+
+  const wrap = el("div", {});
+  container.appendChild(wrap);
+
+  /* ── Observabilité ── */
+  try {
+    const m = await api("/api/system/metrics");
+    const memMB = (m.memory.rss / 1024 / 1024).toFixed(1);
+    const heapUsed = (m.memory.heapUsed / 1024 / 1024).toFixed(1);
+    const heapTotal = (m.memory.heapTotal / 1024 / 1024).toFixed(1);
+    const dbKB = (m.db.size / 1024).toFixed(0);
+    const upH = Math.floor(m.uptime_seconds / 3600);
+    const upM = Math.floor((m.uptime_seconds % 3600) / 60);
+
+    wrap.appendChild(el("h3", { style: { marginBottom: "10px", fontSize: 15 } }, "Observabilité backend"));
+    wrap.appendChild(el("div", { style: { display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "12px", marginBottom: "16px" } },
+      el("div", { className: "card", style: { padding: "14px 16px" } }, el("div", { style: { fontSize: 11, color: "var(--text-muted)", textTransform: "uppercase" } }, "Uptime"), el("div", { style: { fontSize: 22, fontWeight: 800, color: "var(--primary-hover)", fontFamily: "monospace" } }, `${upH}h ${upM}m`)),
+      el("div", { className: "card", style: { padding: "14px 16px" } }, el("div", { style: { fontSize: 11, color: "var(--text-muted)", textTransform: "uppercase" } }, "Requêtes"), el("div", { style: { fontSize: 22, fontWeight: 800, color: "var(--success)", fontFamily: "monospace" } }, String(m.totalRequests))),
+      el("div", { className: "card", style: { padding: "14px 16px" } }, el("div", { style: { fontSize: 11, color: "var(--text-muted)", textTransform: "uppercase" } }, "Mémoire RSS"), el("div", { style: { fontSize: 22, fontWeight: 800, color: "var(--warning)", fontFamily: "monospace" } }, `${memMB} MB`)),
+      el("div", { className: "card", style: { padding: "14px 16px" } }, el("div", { style: { fontSize: 11, color: "var(--text-muted)", textTransform: "uppercase" } }, "DB Size"), el("div", { style: { fontSize: 22, fontWeight: 800, color: "#F472B6", fontFamily: "monospace" } }, `${dbKB} KB`)),
+    ));
+
+    wrap.appendChild(el("div", { className: "card", style: { fontSize: 12, color: "var(--text-muted)" } },
+      `Heap: ${heapUsed} / ${heapTotal} MB · CPU user: ${Math.round(m.cpu.user / 1000)}ms · CPU system: ${Math.round(m.cpu.system / 1000)}ms`,
+    ));
+
+    /* Top routes */
+    if (m.routes && m.routes.length > 0) {
+      wrap.appendChild(el("div", { className: "card" },
+        el("div", { style: { fontWeight: 600, marginBottom: "10px" } }, "Top routes"),
+        el("div", { className: "scroll-list", style: { maxHeight: 200 } },
+          el("table", {},
+            el("thead", {}, el("tr", {}, el("th", {}, "Route"), el("th", {}, "Count"), el("th", {}, "Avg ms"), el("th", {}, "Max ms"))),
+            el("tbody", {}, ...m.routes.slice(0, 10).map(r => el("tr", {},
+              el("td", { style: { fontFamily: "monospace", fontSize: 11 } }, r.route),
+              el("td", { style: { fontFamily: "monospace", fontWeight: 700, color: "var(--primary-hover)" } }, String(r.count)),
+              el("td", { style: { fontFamily: "monospace" } }, String(r.avgMs)),
+              el("td", { style: { fontFamily: "monospace" } }, String(r.maxMs)),
+            ))),
+          ),
+        ),
+      ));
+    }
+  } catch (e) {
+    wrap.appendChild(el("div", { className: "card", style: { color: "var(--danger)" } }, `Erreur métriques: ${e.message}`));
+  }
+
+  /* ── Export ── */
+  wrap.appendChild(el("h3", { style: { marginTop: "20px", marginBottom: "10px", fontSize: 15 } }, "Export de données"));
+  wrap.appendChild(el("div", { className: "card", style: { display: "flex", gap: "10px", flexWrap: "wrap" } },
+    el("button", { className: "btn btn-primary", onclick: async () => {
+      try { const r = await fetch("/api/export/servers?format=xlsx", { headers: { Authorization: `Bearer ${token}` } }); const blob = await r.blob(); const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = "serveurs.xlsx"; a.click(); toast("Export serveurs téléchargé"); } catch (e) { toast(e.message, "error"); }
+    } }, "Export serveurs (.xlsx)"),
+    el("button", { className: "btn btn-primary", onclick: async () => {
+      try { const r = await fetch("/api/export/urls?format=xlsx", { headers: { Authorization: `Bearer ${token}` } }); const blob = await r.blob(); const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = "urls.xlsx"; a.click(); toast("Export URLs téléchargé"); } catch (e) { toast(e.message, "error"); }
+    } }, "Export URLs (.xlsx)"),
+    el("button", { className: "btn btn-secondary", onclick: async () => {
+      try { const r = await fetch("/api/export/report?format=pdf", { headers: { Authorization: `Bearer ${token}` } }); const blob = await r.blob(); const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = "rapport-g1oeil.html"; a.click(); toast("Rapport téléchargé"); } catch (e) { toast(e.message, "error"); }
+    } }, "Rapport PDF"),
+  ));
+
+  /* ── Backup / Restore ── */
+  wrap.appendChild(el("h3", { style: { marginTop: "20px", marginBottom: "10px", fontSize: 15 } }, "Backup & Restore"));
+  const backupCard = el("div", { className: "card" });
+  backupCard.appendChild(el("div", { style: { display: "flex", gap: "10px", marginBottom: "16px" } },
+    el("button", { className: "btn btn-primary", onclick: async () => {
+      try { const r = await api("/api/system/backup", { method: "POST" }); toast(`Backup créé: ${r.filename} (${(r.size / 1024).toFixed(0)} KB)`); renderSystemView(container); } catch (e) { toast(e.message, "error"); }
+    } }, "Créer un backup"),
+    el("label", { className: "btn btn-secondary", style: { cursor: "pointer" } },
+      "Restaurer depuis un fichier...",
+      el("input", { type: "file", accept: ".db", style: { display: "none" }, onchange: async (e) => {
+        if (!e.target.files[0]) return;
+        const fd = new FormData(); fd.append("backup", e.target.files[0]);
+        try { const r = await fetch("/api/system/restore", { method: "POST", headers: { Authorization: `Bearer ${token}` }, body: fd }); const data = await r.json(); toast(data.message || data.error); renderSystemView(container); } catch (e) { toast(e.message, "error"); }
+        e.target.value = "";
+      } }),
+    ),
+  ));
+
+  try {
+    const backups = await api("/api/system/backups");
+    if (backups.length > 0) {
+      const tbody = backups.map(b => el("tr", {},
+        el("td", { style: { fontFamily: "monospace", fontSize: 11 } }, b.filename),
+        el("td", {}, `${(b.size / 1024).toFixed(0)} KB`),
+        el("td", { style: { fontSize: 11, fontFamily: "monospace" } }, fmtDate(b.created.toISOString ? b.created.toISOString() : b.created)),
+        el("td", {},
+          el("button", { className: "btn btn-danger btn-sm", onclick: async () => {
+            try { await api(`/api/system/backups/${encodeURIComponent(b.filename)}`, { method: "DELETE" }); toast("Backup supprimé"); renderSystemView(container); } catch (e) { toast(e.message, "error"); }
+          } }, "Supprimer"),
+        ),
+      ));
+      backupCard.appendChild(el("div", { className: "scroll-list", style: { maxHeight: 250 } },
+        el("table", {},
+          el("thead", {}, el("tr", {}, el("th", {}, "Fichier"), el("th", {}, "Taille"), el("th", {}, "Date"), el("th", {}, "Actions"))),
+          el("tbody", {}, ...tbody),
+        ),
+      ));
+    } else {
+      backupCard.appendChild(el("div", { style: { color: "var(--text-muted)", textAlign: "center", padding: "16px" } }, "Aucun backup"));
+    }
+  } catch {}
+  wrap.appendChild(backupCard);
 }
 
 /* ── Init ── */

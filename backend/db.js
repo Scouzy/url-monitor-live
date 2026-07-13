@@ -109,6 +109,87 @@ db.exec(`
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     last_used TEXT
   );
+
+  CREATE TABLE IF NOT EXISTS check_schedule (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    url_config_id INTEGER NOT NULL,
+    interval_seconds INTEGER NOT NULL DEFAULT 300,
+    enabled INTEGER NOT NULL DEFAULT 1,
+    last_check_at TEXT,
+    last_status TEXT,
+    last_response_time INTEGER,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+    FOREIGN KEY (url_config_id) REFERENCES url_configs(id) ON DELETE CASCADE
+  );
+
+  CREATE TABLE IF NOT EXISTS notification_channels (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    type TEXT NOT NULL DEFAULT 'webhook',
+    config TEXT NOT NULL,
+    enabled INTEGER NOT NULL DEFAULT 1,
+    triggers TEXT NOT NULL DEFAULT 'status_change,check_fail',
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+
+  CREATE TABLE IF NOT EXISTS server_metrics (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    server_name TEXT NOT NULL,
+    cpu REAL,
+    ram REAL,
+    disk REAL,
+    ram_gb REAL,
+    disk_gb REAL,
+    cores INTEGER,
+    ts TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_server_metrics_name_ts ON server_metrics(server_name, ts DESC);
+
+  CREATE TABLE IF NOT EXISTS server_snapshots (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    server_name TEXT NOT NULL,
+    cores INTEGER,
+    ram_gb REAL,
+    disk_gb REAL,
+    cpu REAL,
+    ram REAL,
+    disk REAL,
+    ts TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_server_snapshots_name_ts ON server_snapshots(server_name, ts DESC);
+
+  CREATE TABLE IF NOT EXISTS ssl_certificates (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    url TEXT NOT NULL UNIQUE,
+    issuer TEXT,
+    subject TEXT,
+    valid_from TEXT,
+    expiry_date TEXT,
+    days_left INTEGER,
+    last_checked TEXT NOT NULL DEFAULT (datetime('now')),
+    status TEXT DEFAULT 'unknown'
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_ssl_expiry ON ssl_certificates(expiry_date);
+
+  CREATE TABLE IF NOT EXISTS check_results (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    url_config_id INTEGER,
+    url TEXT NOT NULL,
+    status TEXT NOT NULL,
+    response_time INTEGER,
+    error_code INTEGER,
+    error_message TEXT,
+    checked_at TEXT NOT NULL DEFAULT (datetime('now')),
+    FOREIGN KEY (url_config_id) REFERENCES url_configs(id) ON DELETE SET NULL
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_check_results_url ON check_results(url, checked_at DESC);
+  CREATE INDEX IF NOT EXISTS idx_check_results_checked ON check_results(checked_at DESC);
 `);
 
 /* ── Migration: add status column if missing ── */
@@ -117,6 +198,13 @@ try {
 } catch {
   db.exec("ALTER TABLE users ADD COLUMN status TEXT NOT NULL DEFAULT 'approved'");
   console.log("[DB] Migration: added 'status' column to users table");
+}
+
+/* ── Migration: add retention_days to server_metrics (configurable) ── */
+try {
+  db.prepare("SELECT retention_days FROM check_schedule LIMIT 1").get();
+} catch {
+  db.exec("ALTER TABLE check_schedule ADD COLUMN retention_days INTEGER DEFAULT 90");
 }
 
 /* ── Seed admin par défaut ── */

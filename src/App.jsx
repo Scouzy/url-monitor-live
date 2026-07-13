@@ -25,14 +25,23 @@ import InterventionStats from "./components/InterventionStats";
 import IncidentStats from "./components/IncidentStats";
 import SettingsPage from "./components/SettingsPage";
 import DashboardPage from "./components/DashboardPage";
+import UptimeHistory from "./components/UptimeHistory";
+import SslCertificates from "./components/SslCertificates";
+import ServerGeoMap from "./components/ServerGeoMap";
+import SnapshotDiff from "./components/SnapshotDiff";
+import GlobalSearch from "./components/GlobalSearch";
 import { subscribeServers, getServers, setServers, getServersMeta, recommendations as getRecos, patchServerMetrics, refreshFromStorage, subscribeAppFilter, getAppFilter } from "./utils/servers";
 import { loadVpsAgents, fetchVpsMetrics, setAgentMetrics, setAgentError, subscribeAgents, getAllAgentMetrics } from "./utils/vpsAgents";
 import { loadCapacitySettings, saveCapacitySettings } from "./utils/capacitySettings";
 import { loadTodos } from "./utils/todoStorage";
 import { clearSnapshots } from "./utils/snapshots";
+import { recordSlaCheck } from "./utils/slaStorage";
 import { pushSync, pullSync, subscribeSyncStream } from "./utils/lanSync";
 import LoginPanel from "./components/LoginPanel";
 import { isLoggedIn as checkLoggedIn, verifyToken, logAppIncident, logItcareDisconnect, startHeartbeat, canEdit, canDelete, isSuperAdmin, getAuthUser } from "./utils/backendAuth";
+import { useWebSocket } from "./utils/useWebSocket";
+import { serverMetricsApi } from "./utils/backendApi";
+import BackendStatus from "./components/BackendStatus";
 
 export default function App() {
   const [groups, setGroups] = useState(() => loadGroups() || getDefaultGroups());
@@ -76,6 +85,72 @@ export default function App() {
   const [todoBadge, setTodoBadge] = useState(() => loadTodos().filter(t => t.status !== "done").length);
 
   useEffect(() => { localStorage.setItem("g1oeil_module", activeModule); }, [activeModule]);
+
+  /* ── Recherche globale (Ctrl+K) ── */
+  const [searchOpen, setSearchOpen] = useState(false);
+  useEffect(() => {
+    const handler = (e) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === "k") {
+        e.preventDefault();
+        setSearchOpen(o => !o);
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, []);
+  const navigateToModule = useCallback((mod) => {
+    if (mod === "journal" || mod === "parametres") { setActiveModule("monitor"); setMainTab(mod); }
+    else { setActiveModule(mod); setMainTab("surveillance"); }
+  }, []);
+
+  /* ── WebSocket temps réel backend ── */
+  const wsMessageHandler = useCallback((msg) => {
+    if (msg.type === "check_result" || msg.type === "status_change") {
+      /* Mettre à jour l'UI si l'URL est monitorée côté frontend */
+      const data = msg.data;
+      if (data?.url) {
+        setGroups(prev => prev.map(g => ({
+          ...g,
+          urls: g.urls.map(u => {
+            if (u.url === data.url) {
+              return { ...u, isUp: data.newStatus === "online", lastCheck: Date.now(), responseTime: data.responseTime };
+            }
+            return u;
+          }),
+        })));
+      }
+    } else if (msg.type === "alert") {
+      /* Afficher un toast pour les alertes backend */
+      const data = msg.data;
+      if (data?.url) {
+        addToast(data.url, data.newStatus === "online" ? "online" : "offline");
+      }
+    }
+  }, []);
+  const { connected: wsConnected } = useWebSocket(wsMessageHandler);
+
+  /* ── Push périodique des métriques serveurs vers le backend ── */
+  useEffect(() => {
+    if (!checkLoggedIn()) return;
+    const pushMetrics = () => {
+      const servers = getServers();
+      if (servers.length === 0) return;
+      const metrics = servers.map(s => ({
+        server_name: s.name || s.ip || "unknown",
+        cpu: s.cpu ?? null,
+        ram: s.ram ?? null,
+        disk: s.disk ?? null,
+        ram_gb: s.ramGb ?? null,
+        disk_gb: s.diskGb ?? null,
+        cores: s.cores ?? null,
+      })).filter(m => m.cpu != null || m.ram != null);
+      if (metrics.length > 0) {
+        serverMetricsApi.postBatchMetrics(metrics).catch(() => {});
+      }
+    };
+    const interval = setInterval(pushMetrics, 60000); /* toutes les 60s */
+    return () => clearInterval(interval);
+  }, []);
 
   /* ── Fetch ITCare tickets : au lancement + sur Actualiser ── */
   const refreshItcareTickets = useCallback(async () => {
@@ -373,7 +448,7 @@ export default function App() {
       const type = result.isUp ? "online" : "offline";
       addToast(urlStr, type);
       /* Notification navigateur */
-      if (typeof Notification !== "undefined" && Notification.permission === "granted") {
+      if (notifEnabled && typeof Notification !== "undefined" && Notification.permission === "granted") {
         const domain = (() => { try { return new URL(urlStr).hostname; } catch { return urlStr; } })();
         new Notification(type === "offline" ? `🔴 ${domain} est hors ligne` : `🟢 ${domain} est de retour`, {
           body: type === "offline" ? "Le site ne répond plus." : "Le site répond à nouveau.",
@@ -390,6 +465,7 @@ export default function App() {
       }
     }
     prevStatusRef.current[urlId] = result.isUp;
+    recordSlaCheck({ url: urlStr, isUp: result.isUp, responseTime: result.responseTime, status: result.isUp ? (result.responseTime > 2000 ? "slow" : "online") : "offline" });
     setGroups(gs => gs.map(g => {
       if (g.id !== groupId) return g;
       return {
@@ -410,7 +486,7 @@ export default function App() {
       };
     }));
     setCheckingIds(prev => { const s = new Set(prev); s.delete(urlId); return s; });
-  }, [addToast]);
+  }, [addToast, notifEnabled]);
 
   const runCheck = useCallback((groupId, urlId, urlStr, monitoring) => {
     setCheckingIds(cs => new Set(cs).add(urlId));
@@ -654,18 +730,19 @@ export default function App() {
               <h1 style={{ fontSize: isMobile ? 14 : 16, fontWeight: 700, color: "#F9FAFB", margin: 0 }}>
                 {activeModule === "servers"
                   ? ({ inventory: "Inventaire serveurs", detail: selectedServerId ? `Détail · ${(filteredServers.find(s => s.id === selectedServerId) || allServers.find(s => s.id === selectedServerId))?.name || ""}` : "Détail serveur", agents: "Agents VPS", config: "Configuration agents", deploy: "Déploiement en masse" }[serverSubTab] || "Serveurs")
-                  : ({ dashboard: "Dashboard", capacity: "Capacity Planning", todo: "TodoList", intervention: "Interventions", workflows: "Workflows", impacts: "Impacts Applicatifs", journal: "Journal des alertes", parametres: "Paramètres" }[activeModule] || activeModule)}
+                  : ({ dashboard: "Dashboard", capacity: "Capacity Planning", uptime: "SLA / Uptime", ssl: "Certificats SSL", geo: "Carte des serveurs", "snapshot-diff": "Comparaison de snapshots", todo: "TodoList", intervention: "Interventions", workflows: "Workflows", impacts: "Impacts Applicatifs", journal: "Journal des alertes", parametres: "Paramètres" }[activeModule] || activeModule)}
               </h1>
               {!isMobile && (
               <p style={{ fontSize: 11, color: "#4B5563", margin: 0 }}>
                 {activeModule === "servers"
                   ? ({ inventory: "CPU, RAM et disque en temps réel par serveur", agents: "Supervision temps réel · Linux & Windows · CPU / RAM / Disque / Réseau / Processus / Répertoires", config: "Ajouter · modifier · tester les agents VPS · télécharger les scripts", deploy: "Scripts pré-remplis SSH · WinRM · Ansible pour déployer les agents sur tout l'inventaire" }[serverSubTab] || "")
-                  : ({ dashboard: "Vue synthetique - KPIs - alertes - SSL - performance", capacity: "Projections 6 mois · seuil critique 90% · recommandations", todo: "Tâches en cours · auto-générées + manuelles", intervention: "Tickets d'intervention et mises en production depuis ITCare", workflows: "Création et gestion de procédures d'intervention pas à pas", impacts: "Cartographie des dépendances entre applications et serveurs", journal: "Historique des événements · pannes · SSL · serveurs", parametres: "Configuration de l'application" }[activeModule] || "")}
+                  : ({ dashboard: "Vue synthetique - KPIs - alertes - SSL - performance", capacity: "Projections 6 mois · seuil critique 90% · recommandations", uptime: "SLA sur 7j / 30j / 90j · disponibilité par URL et par groupe", ssl: "Certificats SSL · tri par expiration · alertes 30j / 7j", geo: "Localisation géographique des serveurs · heatmap des zones en alerte", "snapshot-diff": "Comparaison de snapshots · évolution des ressources entre deux dates", todo: "Tâches en cours · auto-générées + manuelles", intervention: "Tickets d'intervention et mises en production depuis ITCare", workflows: "Création et gestion de procédures d'intervention pas à pas", impacts: "Cartographie des dépendances entre applications et serveurs", journal: "Historique des événements · pannes · SSL · serveurs", parametres: "Configuration de l'application" }[activeModule] || "")}
               </p>
               )}
               </div>
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: isMobile ? 6 : 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
+              {checkLoggedIn() && <BackendStatus wsConnected={wsConnected} />}
               {activeModule === "servers" && (
                 <>
                   <div style={{
@@ -736,6 +813,10 @@ export default function App() {
             {activeModule === "servers"   && serverSubTab === "config"    && <VpsAgentsConfig />}
             {activeModule === "servers"   && serverSubTab === "deploy"    && <AgentDeployMass servers={filteredServers} />}
             {activeModule === "capacity"  && <CapacityPlanning servers={filteredServers} />}
+            {activeModule === "uptime"    && <UptimeHistory groups={groups} allUrls={allUrls} />}
+            {activeModule === "ssl"       && <SslCertificates groups={groups} allUrls={allUrls} />}
+            {activeModule === "geo"       && <ServerGeoMap servers={filteredServers} />}
+            {activeModule === "snapshot-diff" && <SnapshotDiff servers={filteredServers} />}
             {activeModule === "todo"      && <TodoList servers={filteredServers} allUrls={allUrls} />}
             {activeModule === "intervention" && interventionSubTab === "tickets" && <MEPView isMobile={isMobile} tickets={itcareTickets} loading={itcareLoading} error={itcareError} lastLoad={itcareLastLoad} onRefresh={refreshItcareTickets} />}
             {activeModule === "intervention" && interventionSubTab === "stats"     && <InterventionStats isMobile={isMobile} tickets={itcareTickets} loading={itcareLoading} error={itcareError} lastLoad={itcareLastLoad} onRefresh={refreshItcareTickets} />}
@@ -801,6 +882,26 @@ export default function App() {
             }}>
               <RefreshCw size={13} /> Vérifier tout
             </button>
+            {checkLoggedIn() && (
+              <BackendStatus wsConnected={wsConnected} />
+            )}
+            {typeof Notification !== "undefined" && Notification.permission !== "denied" && (
+              <button onClick={() => {
+                if (Notification.permission === "granted") {
+                  setNotifEnabled(!notifEnabled);
+                } else {
+                  Notification.requestPermission().then(p => setNotifEnabled(p === "granted"));
+                }
+              }} title="Notifications navigateur" style={{
+                display: "flex", alignItems: "center", gap: 5, padding: "5px 12px", borderRadius: 9,
+                background: notifEnabled ? "rgba(52,211,153,0.1)" : "rgba(255,255,255,0.04)",
+                border: `1px solid ${notifEnabled ? "rgba(52,211,153,0.2)" : "rgba(255,255,255,0.08)"}`,
+                color: notifEnabled ? "#34D399" : "#6B7280", fontSize: 12, fontWeight: 600, cursor: "pointer",
+              }}>
+                {notifEnabled ? <Bell size={13} /> : <BellOff size={13} />}
+                {notifEnabled ? "Activées" : "Notifications"}
+              </button>
+            )}
             {!paused && (
               <div style={{
                 padding: "5px 12px", borderRadius: 9, background: "rgba(99,102,241,0.08)",
@@ -1011,6 +1112,7 @@ export default function App() {
       </>)}
 
       <Toast toasts={toasts} onDismiss={dismissToast} />
+      <GlobalSearch open={searchOpen} onClose={() => setSearchOpen(false)} groups={groups} servers={filteredServers} incidentLog={incidentLog} onNavigate={navigateToModule} />
     </div>
   );
 }

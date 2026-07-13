@@ -3,6 +3,9 @@ import { createRoot } from "react-dom/client";
 import "./index.css";
 import App from "./App.jsx";
 import ErrorBoundary from "./components/ErrorBoundary";
+import { initTheme } from "./utils/theme";
+
+initTheme();
 
 /* Polyfill crypto.randomUUID pour les navigateurs mobiles qui ne le supportent pas */
 try {
